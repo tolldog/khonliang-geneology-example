@@ -8,3 +8,4 @@ venv/
 *.db
 data/
 model_profiles.yaml
+.env
