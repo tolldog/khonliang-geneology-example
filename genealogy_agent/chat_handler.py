@@ -643,7 +643,8 @@ class ResearchChatHandler:
         if not self.tree:
             return {"type": "error", "content": "No tree loaded."}
 
-        criteria = message.split(None, 1)[1].strip() if " " in message else ""
+        parts = message.split(None, 1)
+        criteria = parts[1].strip() if len(parts) > 1 else ""
         if not criteria:
             return {
                 "type": "error",
@@ -655,6 +656,8 @@ class ResearchChatHandler:
                     "  !researchwho born in maryland between 1700 and 1800"
                 ),
             }
+
+        import re
 
         from genealogy_agent.tree_analysis import TreeAnalyzer
 
@@ -680,9 +683,7 @@ class ResearchChatHandler:
 
             # Queue web lookup for each (up to max)
             if queued < max_research:
-                search_name = analyzer._search_name(p)
-                import re
-
+                search_name = analyzer.search_name(p)
                 year = None
                 year_match = re.search(r"\d{4}", p.birth_date or "")
                 if year_match:

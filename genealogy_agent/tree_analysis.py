@@ -109,7 +109,7 @@ class TreeAnalyzer:
                 severity = "info"
 
             place = person.birth_place or person.death_place or ""
-            search_name = self._search_name(person)
+            search_name = self.search_name(person)
             query_parts = [f'"{search_name}"']
             if place:
                 query_parts.append(place.split(",")[0].strip())
@@ -160,7 +160,7 @@ class TreeAnalyzer:
                     person_name=person.full_name,
                     description=f"Missing: {', '.join(missing)}",
                     severity="low" if len(missing) <= 2 else "medium",
-                    research_query=f'"{self._search_name(person)}" genealogy records',
+                    research_query=f'"{self.search_name(person)}" genealogy records',
                     metadata={"missing_fields": missing},
                 ))
 
@@ -243,7 +243,7 @@ class TreeAnalyzer:
                         description=f"Husband unknown for {wife.full_name}",
                         severity="low",
                         research_query=(
-                            f'"{self._search_name(wife)}" husband marriage '
+                            f'"{self.search_name(wife)}" husband marriage '
                             f"{wife.birth_place or ''}"
                         ),
                     ))
@@ -258,7 +258,7 @@ class TreeAnalyzer:
                         description=f"Wife unknown for {husb.full_name}",
                         severity="low",
                         research_query=(
-                            f'"{self._search_name(husb)}" wife marriage '
+                            f'"{self.search_name(husb)}" wife marriage '
                             f"{husb.birth_place or ''}"
                         ),
                     ))
@@ -289,7 +289,7 @@ class TreeAnalyzer:
                     ),
                     severity="medium",
                     research_query=(
-                        f'"{self._search_name(ancestor)}" '
+                        f'"{self.search_name(ancestor)}" '
                         f"{place.split(',')[0].strip() if place else ''} "
                         f"{year or ''} genealogy parents"
                     ).strip(),
@@ -334,7 +334,7 @@ class TreeAnalyzer:
         return int(match.group()) if match else None
 
     @staticmethod
-    def _search_name(person: Person) -> str:
+    def search_name(person: Person) -> str:
         """Build a search-friendly name: first + last, drop middle names."""
         given = person.given_name.split()[0] if person.given_name else ""
         surname = person.surname or ""
@@ -354,7 +354,7 @@ class TreeAnalyzer:
         - Place: "born in ohio", "from maryland", "in virginia"
         - Year: "before 1920", "after 1800", "between 1850 and 1900"
         - Surname: "surname toll", "last name thomas"
-        - Missing: "no parents", "no death date", "unknown"
+        - Missing: "no parents", "no death date", "no birth date"
 
         Example:
             analyzer.query_persons("males born in ohio before 1920")
@@ -364,11 +364,11 @@ class TreeAnalyzer:
         criteria_lower = criteria.lower()
         results = list(self.tree.persons.values())
 
-        # Sex filter
-        if any(w in criteria_lower for w in ["male", "males", "men", "man"]):
-            results = [p for p in results if p.sex == "M"]
-        elif any(w in criteria_lower for w in ["female", "females", "women", "woman"]):
+        # Sex filter (check female first to avoid "male" matching inside "female")
+        if any(w in criteria_lower.split() for w in ["female", "females", "women", "woman"]):
             results = [p for p in results if p.sex == "F"]
+        elif any(w in criteria_lower.split() for w in ["male", "males", "men", "man"]):
+            results = [p for p in results if p.sex == "M"]
 
         # Place filter — extract place after "born in", "from", "in"
         # Stop at year keywords or end of string
