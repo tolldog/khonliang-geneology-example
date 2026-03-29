@@ -18,12 +18,17 @@ LLM-backed genealogy research tool — example project demonstrating [ollama-kho
 # Install (requires Ollama running locally)
 pip install -e .
 
-# Load and explore a GEDCOM file
+# Place your GEDCOM file in data/
+mkdir -p data
+cp /path/to/your/family.ged data/
+
+# Load and explore
 genealogy load data/family.ged
 genealogy search data/family.ged "Smith"
 genealogy chat data/family.ged
 
-# Start the chat server (WebSocket + Web UI)
+# Start the chat server (reads config.yaml or env vars)
+# GEDCOM path: set in config.yaml, GEDCOM_FILE env var, or defaults to data/family.ged
 python -m genealogy_agent.server
 
 # Connect via CLI
@@ -87,6 +92,8 @@ theme:
   primary: "#e94560"
   background: "#1a1a2e"
 ```
+
+Environment variable overrides: `OLLAMA_URL`, `GEDCOM_FILE`, `WS_PORT`, `WEB_PORT`, `APP_TITLE`.
 
 ## Architecture
 
