@@ -36,6 +36,8 @@ class ResearchChatHandler:
         "!ingest", "!ingest-file", "!ingest-dir",
         # Direct search
         "!google", "!fetch",
+        # Tree analysis
+        "!gaps", "!dead-ends", "!anomalies",
         # Knowledge management
         "!knowledge", "!prune", "!promote", "!demote",
         "!axiom",
@@ -46,12 +48,14 @@ class ResearchChatHandler:
         pool: ResearchPool,
         trigger: ResearchTrigger,
         librarian: Optional[Librarian] = None,
+        tree: Optional[Any] = None,
         poll_interval: float = 0.5,
         poll_timeout: float = 30.0,
     ):
         self.pool = pool
         self.trigger = trigger
         self.librarian = librarian
+        self.tree = tree
         self.poll_interval = poll_interval
         self.poll_timeout = poll_timeout
 
@@ -78,6 +82,14 @@ class ResearchChatHandler:
             return self._handle_google(message)
         if msg_lower.startswith("!fetch"):
             return self._handle_fetch(message, scope)
+
+        # Tree analysis
+        if msg_lower.startswith("!gaps"):
+            return self._handle_gaps(message)
+        if msg_lower.startswith("!dead-ends"):
+            return self._handle_dead_ends(message)
+        if msg_lower.startswith("!anomalies"):
+            return self._handle_anomalies()
 
         # Ingestion commands
         if msg_lower.startswith("!ingest-file"):
@@ -487,6 +499,129 @@ class ResearchChatHandler:
         return {
             "type": "error",
             "content": "Usage: !axiom key | content (or !axiom to list)",
+        }
+
+    # ------------------------------------------------------------------
+    # Tree analysis
+    # ------------------------------------------------------------------
+
+    def _handle_gaps(self, message: str) -> Dict[str, Any]:
+        """Analyze tree for gaps. !gaps or !gaps Timothy Toll"""
+        if not self.tree:
+            return {"type": "error", "content": "No tree loaded."}
+
+        from genealogy_agent.tree_analysis import TreeAnalyzer
+
+        analyzer = TreeAnalyzer(self.tree)
+        name = message.split(None, 1)[1].strip() if " " in message else ""
+
+        return {
+            "type": "response",
+            "content": analyzer.summary(root_name=name or None),
+            "role": "analyst",
+            "reason": "gap_analysis",
+        }
+
+    def _handle_dead_ends(self, message: str) -> Dict[str, Any]:
+        """
+        Find dead-end lines. !dead-ends Timothy Toll
+        Optionally auto-queues research for top dead ends.
+        !dead-ends Timothy Toll research — queues web lookups
+        """
+        if not self.tree:
+            return {"type": "error", "content": "No tree loaded."}
+
+        from genealogy_agent.tree_analysis import TreeAnalyzer
+
+        text = message.split(None, 1)[1].strip() if " " in message else ""
+        auto_research = "research" in text.lower()
+        name = text.replace("research", "").strip()
+
+        if not name:
+            return {
+                "type": "error",
+                "content": "Usage: !dead-ends <name> [research]",
+            }
+
+        analyzer = TreeAnalyzer(self.tree)
+        gaps = analyzer.find_dead_ends_for(name)
+
+        if not gaps:
+            return {
+                "type": "response",
+                "content": f"No dead ends found for {name}.",
+                "role": "analyst",
+                "reason": "dead_ends",
+            }
+
+        lines = [f"Dead-end lines for {name} ({len(gaps)}):"]
+        queued = 0
+
+        for g in gaps[:20]:
+            lines.append(f"\n  {g.description}")
+            if g.research_query:
+                lines.append(f"    Query: {g.research_query}")
+
+            # Auto-queue research for top dead ends
+            if auto_research and g.research_query and queued < 5:
+                try:
+                    from khonliang.research.models import ResearchTask
+
+                    self.pool.submit(ResearchTask(
+                        task_type="person_lookup",
+                        query=g.research_query,
+                        scope="genealogy",
+                        source="dead_end_analysis",
+                        priority=-1,
+                    ))
+                    queued += 1
+                    lines.append("    → Queued for research")
+                except Exception:
+                    pass
+
+        if len(gaps) > 20:
+            lines.append(f"\n  ... and {len(gaps) - 20} more")
+
+        if queued:
+            lines.append(f"\nQueued {queued} research tasks (background)")
+
+        return {
+            "type": "response",
+            "content": "\n".join(lines),
+            "role": "analyst",
+            "reason": "dead_ends",
+        }
+
+    def _handle_anomalies(self) -> Dict[str, Any]:
+        """Find date anomalies in the tree."""
+        if not self.tree:
+            return {"type": "error", "content": "No tree loaded."}
+
+        from genealogy_agent.tree_analysis import TreeAnalyzer
+
+        analyzer = TreeAnalyzer(self.tree)
+        gaps = analyzer.find_date_anomalies()
+
+        if not gaps:
+            return {
+                "type": "response",
+                "content": "No date anomalies found.",
+                "role": "analyst",
+                "reason": "anomalies",
+            }
+
+        lines = [f"Date anomalies ({len(gaps)}):"]
+        for g in gaps[:20]:
+            lines.append(f"  [{g.severity}] {g.person_name}: {g.description}")
+
+        if len(gaps) > 20:
+            lines.append(f"\n  ... and {len(gaps) - 20} more")
+
+        return {
+            "type": "response",
+            "content": "\n".join(lines),
+            "role": "analyst",
+            "reason": "anomalies",
         }
 
     def get_status(self) -> Dict[str, Any]:

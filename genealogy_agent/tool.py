@@ -304,12 +304,61 @@ def cmd_websearch_history(place: str, year: str) -> str:
     return searcher.build_context(results)
 
 
+def cmd_gaps(name: str = "") -> str:
+    """Analyze tree for gaps and research opportunities."""
+    from genealogy_agent.tree_analysis import TreeAnalyzer
+
+    tree = _get_tree()
+    analyzer = TreeAnalyzer(tree)
+
+    if name:
+        return analyzer.summary(root_name=name)
+    return analyzer.summary()
+
+
+def cmd_dead_ends(name: str) -> str:
+    """Find dead-end ancestor lines for a person."""
+    from genealogy_agent.tree_analysis import TreeAnalyzer
+
+    tree = _get_tree()
+    analyzer = TreeAnalyzer(tree)
+    gaps = analyzer.find_dead_ends_for(name)
+
+    if not gaps:
+        return f"No dead ends found for {name}"
+
+    lines = [f"Dead-end lines for {name} ({len(gaps)}):"]
+    for g in gaps:
+        lines.append(f"\n  {g.description}")
+        if g.research_query:
+            lines.append(f"    Search: {g.research_query}")
+    return "\n".join(lines)
+
+
+def cmd_anomalies() -> str:
+    """Find date anomalies in the tree."""
+    from genealogy_agent.tree_analysis import TreeAnalyzer
+
+    tree = _get_tree()
+    analyzer = TreeAnalyzer(tree)
+    gaps = analyzer.find_date_anomalies()
+
+    if not gaps:
+        return "No date anomalies found."
+
+    lines = [f"Date anomalies ({len(gaps)}):"]
+    for g in gaps:
+        lines.append(f"  [{g.severity}] {g.person_name}: {g.description}")
+    return "\n".join(lines)
+
+
 def main():
     if len(sys.argv) < 2:
         print(
             "Usage: python -m genealogy_agent.tool <command> [args]\n"
             "Commands: summary, search, list, person, ancestors, "
-            "descendants, context, query, check, narrate"
+            "descendants, context, gaps, dead-ends, anomalies, "
+            "query, check, narrate, websearch"
         )
         sys.exit(1)
 
@@ -348,6 +397,9 @@ def main():
             args.rsplit(None, 1)[0] if " " in args else args,
             args.rsplit(None, 1)[1] if " " in args else "1800",
         ),
+        "gaps": lambda: cmd_gaps(args),
+        "dead-ends": lambda: cmd_dead_ends(args),
+        "anomalies": lambda: cmd_anomalies(),
     }
 
     if cmd not in commands:
