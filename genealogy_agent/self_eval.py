@@ -12,7 +12,7 @@ The evaluation can:
 - Pass the response through unchanged (good)
 - Append a caveat ("Note: could not verify...")
 - Flag specific claims as unverified
-- Reject and regenerate (if confidence is very low)
+- Skip evaluation for certain roles (e.g. research)
 """
 
 import logging
@@ -58,6 +58,15 @@ class ResponseEvaluator:
                 "caveat": str or None,
             }
         """
+        # Skip evaluation for certain roles where checking is not useful
+        if role == "research":
+            return {
+                "passed": True,
+                "confidence": 1.0,
+                "issues": [],
+                "caveat": None,
+            }
+
         issues = []
 
         # Check for names mentioned that aren't in the tree
@@ -73,7 +82,7 @@ class ResponseEvaluator:
         issues.extend(rel_issues)
 
         # Check for hedging language that suggests uncertainty
-        hedge_issues = self._check_hedging(response)
+        hedge_issues = self._check_hedging(response, query=query)
         issues.extend(hedge_issues)
 
         # Score
@@ -138,6 +147,7 @@ class ResponseEvaluator:
                 ):
                     issues.append({
                         "type": "unknown_name",
+                        "name": name,
                         "detail": f"'{name}' not found in tree data",
                         "severity": "medium",
                     })
@@ -150,7 +160,7 @@ class ResponseEvaluator:
 
         # Find date claims in format "born YYYY" or "in YYYY"
         date_claims = re.findall(
-            r"(\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b[^.]*?"
+            r"(\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b[^.]*?"
             r"(?:born|died|b\.|d\.)\s+(?:in\s+)?(\d{4})",
             response,
         )
@@ -165,17 +175,31 @@ class ResponseEvaluator:
             tree_birth = self._extract_year(person.birth_date)
             tree_death = self._extract_year(person.death_date)
 
+            context = response[
+                max(0, response.find(name) - 20):
+                response.find(name) + len(name) + 50
+            ].lower()
+
             if tree_birth and abs(tree_birth - year) > 5:
-                # Response says different year than tree
-                if "born" in response[
-                    max(0, response.find(name) - 20):
-                    response.find(name) + len(name) + 50
-                ].lower():
+                # Response says different birth year than tree
+                if "born" in context or "b." in context:
                     issues.append({
                         "type": "date_mismatch",
                         "detail": (
                             f"Response says {name} born {year}, "
                             f"tree says {tree_birth}"
+                        ),
+                        "severity": "high",
+                    })
+
+            if tree_death and abs(tree_death - year) > 5:
+                # Response says different death year than tree
+                if "died" in context or "d." in context:
+                    issues.append({
+                        "type": "date_mismatch",
+                        "detail": (
+                            f"Response says {name} died {year}, "
+                            f"tree says {tree_death}"
                         ),
                         "severity": "high",
                     })
@@ -214,7 +238,7 @@ class ResponseEvaluator:
 
         return issues
 
-    def _check_hedging(self, response: str) -> List[Dict]:
+    def _check_hedging(self, response: str, query: str = "") -> List[Dict]:
         """Detect hedging language that suggests the LLM is uncertain."""
         issues = []
         resp_lower = response.lower()
@@ -232,9 +256,12 @@ class ResponseEvaluator:
 
         for phrase in heavy_hedge:
             if phrase in resp_lower:
+                detail = f"Agent expressed uncertainty: '{phrase}'"
+                if query:
+                    detail += f" (query: {query[:80]})"
                 issues.append({
                     "type": "uncertainty",
-                    "detail": f"Agent expressed uncertainty: '{phrase}'",
+                    "detail": detail,
                     "severity": "low",
                 })
                 break

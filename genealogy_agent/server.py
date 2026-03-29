@@ -91,13 +91,13 @@ class GenealogyChat(ChatServer):
             # or couldn't find info, queue background research
             if self.research_handler:
                 self._queue_research_from_eval(
-                    evaluation, content, response_text
+                    evaluation, content
                 )
 
         return resp
 
     def _queue_research_from_eval(
-        self, evaluation, query, response
+        self, evaluation, query
     ):
         """Queue research tasks based on evaluation findings."""
         for issue in evaluation["issues"]:
@@ -114,11 +114,11 @@ class GenealogyChat(ChatServer):
                     ))
                     logger.info(f"Auto-research queued from uncertainty: {query[:40]}")
                 except Exception:
-                    pass
+                    logger.debug("Failed to queue uncertainty research", exc_info=True)
 
             elif issue["type"] == "unknown_name":
                 # Name mentioned but not in tree — look it up
-                name = issue["detail"].split("'")[1] if "'" in issue["detail"] else ""
+                name = issue.get("name", "")
                 if name:
                     try:
                         from khonliang.research.models import ResearchTask
@@ -131,7 +131,7 @@ class GenealogyChat(ChatServer):
                         ))
                         logger.info(f"Auto-research queued for unknown name: {name}")
                     except Exception:
-                        pass
+                        logger.debug("Failed to queue unknown-name research", exc_info=True)
 
 
 def build_server(config: Dict[str, Any]):
