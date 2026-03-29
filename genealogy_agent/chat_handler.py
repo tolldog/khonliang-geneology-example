@@ -688,8 +688,18 @@ class ResearchChatHandler:
                 if year_match:
                     year = year_match.group()
 
-                place = ""
-                if p.birth_place:
+                # Use criteria place (what user searched for) as primary,
+                # fall back to birth place if no criteria place
+                criteria_place = ""
+                place_match = re.search(
+                    r"(?:born in|lived in|from|in)\s+([a-z][a-z\s]+?)(?:\s|$)",
+                    criteria.lower(),
+                )
+                if place_match:
+                    criteria_place = place_match.group(1).strip()
+
+                place = criteria_place
+                if not place and p.birth_place:
                     place = p.birth_place.split(",")[0].strip()
 
                 query = f'"{search_name}"'
