@@ -1,0 +1,27 @@
+# Genealogy Agent Configuration
+
+server:
+  host: "0.0.0.0"
+  ws_port: 8765
+  web_port: 8766
+
+app:
+  title: "Genealogy Agent"
+  gedcom: "data/Toll Family Tree.ged"
+  knowledge_db: "data/knowledge.db"
+
+ollama:
+  url: "http://localhost:11434"
+  models:
+    researcher: "llama3.2:3b"
+    fact_checker: "qwen2.5:7b"
+    narrator: "llama3.1:8b"
+
+theme:
+  primary: "#e94560"
+  background: "#1a1a2e"
+  surface: "#16213e"
+  border: "#0f3460"
+  text: "#e0e0e0"
+  text_muted: "#666666"
+  success: "#4ecca3"

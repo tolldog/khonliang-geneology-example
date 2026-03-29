@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "genealogy-agent"
+version = "0.1.0"
+description = "LLM-backed genealogy research tool powered by khonliang"
+requires-python = ">=3.10"
+dependencies = [
+    "ollama-khonliang @ file:///mnt/dev/ttoll/dispatch",
+    "websockets>=12.0",
+    "ddgs>=9.0",
+    "beautifulsoup4>=4.12",
+    "requests>=2.31",
+]
+
+[project.scripts]
+genealogy = "genealogy_agent.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["genealogy_agent*"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100

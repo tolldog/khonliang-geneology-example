@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Genealogy Agent</title>
+<style>
+  :root { --primary: #e94560; --background: #1a1a2e; --surface: #16213e; --border: #0f3460; --text: #e0e0e0; --text-muted: #666666; --success: #4ecca3; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--background); color: var(--text); height: 100vh; display: flex; flex-direction: column; }
+  header { background: var(--surface); padding: 12px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; }
+  header h1 { font-size: 18px; color: var(--primary); }
+  header .status { font-size: 12px; color: var(--text-muted); margin-left: auto; }
+  header .status.connected { color: var(--success); }
+  #chat { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  .msg { max-width: 80%; padding: 10px 14px; border-radius: 12px; line-height: 1.5; font-size: 14px; white-space: pre-wrap; }
+  .msg.user { align-self: flex-end; background: var(--border); color: var(--text); }
+  .msg.agent { align-self: flex-start; background: var(--surface); border: 1px solid var(--border); }
+  .msg .meta { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+  .msg .role { color: var(--primary); font-weight: 600; font-size: 12px; margin-bottom: 4px; }
+  .msg.system { align-self: center; background: none; color: var(--text-muted); font-size: 12px; font-style: italic; }
+  #input-area { background: var(--surface); padding: 12px 16px; border-top: 1px solid var(--border); display: flex; gap: 8px; }
+  #input { flex: 1; background: var(--background); border: 1px solid var(--border); color: var(--text); padding: 10px 14px; border-radius: 8px; font-size: 14px; outline: none; }
+  #input:focus { border-color: var(--primary); }
+  #send { background: var(--primary); color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-size: 14px; }
+  #send:hover { opacity: 0.9; }
+  #send:disabled { background: #444; cursor: not-allowed; }
+  .typing { color: var(--text-muted); font-style: italic; font-size: 13px; padding: 4px 14px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Genealogy Agent</h1>
+  <span id="status" class="status">Disconnected</span>
+</header>
+<div id="chat"></div>
+<div id="input-area">
+  <input id="input" type="text" placeholder="Ask about your family tree..." autocomplete="off" />
+  <button id="send">Send</button>
+</div>
+<script>
+const WS_URL = `ws://${location.hostname}:${location.port ? parseInt(location.port) - 1 : 8765}`;
+const chat = document.getElementById('chat');
+const input = document.getElementById('input');
+const sendBtn = document.getElementById('send');
+const statusEl = document.getElementById('status');
+
+let ws = null;
+let sessionId = null;
+let lastMsgId = null;
+
+function addMessage(text, cls, meta) {
+  const div = document.createElement('div');
+  div.className = `msg ${cls}`;
+  if (meta && meta.role) {
+    const roleEl = document.createElement('div');
+    roleEl.className = 'role';
+    roleEl.textContent = meta.role + (meta.reason ? ` (${meta.reason})` : '');
+    div.appendChild(roleEl);
+  }
+  const contentEl = document.createElement('div');
+  contentEl.textContent = text;
+  div.appendChild(contentEl);
+  if (meta && meta.elapsed) {
+    const metaEl = document.createElement('div');
+    metaEl.className = 'meta';
+    metaEl.textContent = meta.elapsed;
+    div.appendChild(metaEl);
+  }
+  chat.appendChild(div);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function connect() {
+  ws = new WebSocket(WS_URL);
+  ws.onopen = () => {
+    statusEl.textContent = 'Connecting...';
+    statusEl.className = 'status';
+  };
+  ws.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+    if (msg.type === 'connected') {
+      sessionId = msg.session_id;
+      statusEl.textContent = `Connected (${msg.roles.join(', ')})`;
+      statusEl.className = 'status connected';
+      addMessage(`Connected. Roles: ${msg.roles.join(', ')}`, 'system');
+    } else if (msg.type === 'response') {
+      lastMsgId = msg.message_id;
+      addMessage(msg.content, 'agent', { role: msg.role, reason: msg.reason });
+      sendBtn.disabled = false;
+      input.disabled = false;
+      input.focus();
+    } else if (msg.type === 'search_results') {
+      const results = msg.results || [];
+      const text = results.length
+        ? results.map(r => `[${r.tier === 2 ? 'IMPORTED' : 'DERIVED'}] ${r.title}\n${r.content.substring(0, 150)}`).join('\n\n')
+        : 'No results.';
+      addMessage(text, 'agent', { role: 'search' });
+      sendBtn.disabled = false;
+      input.disabled = false;
+    } else if (msg.type === 'error') {
+      addMessage(`Error: ${msg.content}`, 'system');
+      sendBtn.disabled = false;
+      input.disabled = false;
+    } else if (msg.type === 'ack') {
+      addMessage('Feedback recorded.', 'system');
+    }
+  };
+  ws.onclose = () => {
+    statusEl.textContent = 'Disconnected — reconnecting...';
+    statusEl.className = 'status';
+    setTimeout(connect, 3000);
+  };
+  ws.onerror = () => {
+    statusEl.textContent = 'Connection error';
+    statusEl.className = 'status';
+  };
+}
+
+function send() {
+  const text = input.value.trim();
+  if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
+
+  if (text.startsWith('/search ')) {
+    ws.send(JSON.stringify({ type: 'search', query: text.substring(8) }));
+    addMessage(text, 'user');
+  } else if (text.startsWith('/rate ') && lastMsgId) {
+    const rating = parseInt(text.substring(6));
+    if (rating >= 1 && rating <= 5) {
+      ws.send(JSON.stringify({ type: 'feedback', message_id: lastMsgId, rating }));
+      addMessage(`Rated: ${rating}/5`, 'system');
+    }
+  } else {
+    ws.send(JSON.stringify({ type: 'message', content: text }));
+    addMessage(text, 'user');
+  }
+
+  input.value = '';
+  sendBtn.disabled = true;
+  input.disabled = true;
+}
+
+sendBtn.addEventListener('click', send);
+input.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
+connect();
+</script>
+</body>
+</html>
