@@ -109,7 +109,7 @@ class TreeAnalyzer:
                 severity = "info"
 
             place = person.birth_place or person.death_place or ""
-            search_name = self._search_name(person)
+            search_name = self.search_name(person)
             query_parts = [f'"{search_name}"']
             if place:
                 query_parts.append(place.split(",")[0].strip())
@@ -160,7 +160,7 @@ class TreeAnalyzer:
                     person_name=person.full_name,
                     description=f"Missing: {', '.join(missing)}",
                     severity="low" if len(missing) <= 2 else "medium",
-                    research_query=f'"{self._search_name(person)}" genealogy records',
+                    research_query=f'"{self.search_name(person)}" genealogy records',
                     metadata={"missing_fields": missing},
                 ))
 
@@ -243,7 +243,7 @@ class TreeAnalyzer:
                         description=f"Husband unknown for {wife.full_name}",
                         severity="low",
                         research_query=(
-                            f'"{self._search_name(wife)}" husband marriage '
+                            f'"{self.search_name(wife)}" husband marriage '
                             f"{wife.birth_place or ''}"
                         ),
                     ))
@@ -258,7 +258,7 @@ class TreeAnalyzer:
                         description=f"Wife unknown for {husb.full_name}",
                         severity="low",
                         research_query=(
-                            f'"{self._search_name(husb)}" wife marriage '
+                            f'"{self.search_name(husb)}" wife marriage '
                             f"{husb.birth_place or ''}"
                         ),
                     ))
@@ -289,7 +289,7 @@ class TreeAnalyzer:
                     ),
                     severity="medium",
                     research_query=(
-                        f'"{self._search_name(ancestor)}" '
+                        f'"{self.search_name(ancestor)}" '
                         f"{place.split(',')[0].strip() if place else ''} "
                         f"{year or ''} genealogy parents"
                     ).strip(),
@@ -334,9 +334,113 @@ class TreeAnalyzer:
         return int(match.group()) if match else None
 
     @staticmethod
-    def _search_name(person: Person) -> str:
+    def search_name(person: Person) -> str:
         """Build a search-friendly name: first + last, drop middle names."""
         given = person.given_name.split()[0] if person.given_name else ""
         surname = person.surname or ""
         name = f"{given} {surname}".strip()
         return name or person.full_name
+
+    # ------------------------------------------------------------------
+    # Tree queries
+    # ------------------------------------------------------------------
+
+    def query_persons(self, criteria: str) -> List[Person]:
+        """
+        Filter persons by natural language criteria.
+
+        Parses keywords from the criteria string:
+        - Sex: "males", "females", "men", "women"
+        - Place: "born in ohio", "from maryland", "in virginia"
+        - Year: "before 1920", "after 1800", "between 1850 and 1900"
+        - Surname: "surname toll", "last name thomas"
+        - Missing: "no parents", "no death date", "no birth date"
+
+        Example:
+            analyzer.query_persons("males born in ohio before 1920")
+            analyzer.query_persons("females surname Thomas after 1900")
+            analyzer.query_persons("no parents born in maryland")
+        """
+        criteria_lower = criteria.lower()
+        results = list(self.tree.persons.values())
+
+        # Sex filter (use word boundaries to avoid "male" matching inside "female")
+        if re.search(r"\b(female|females|woman|women)\b", criteria_lower):
+            results = [p for p in results if p.sex == "F"]
+        elif re.search(r"\b(male|males|man|men)\b", criteria_lower):
+            results = [p for p in results if p.sex == "M"]
+
+        # Place filter — extract place after "born in", "from", "in"
+        # Stop at year keywords or end of string
+        place_match = re.search(
+            r"(?:born in|from|in)\s+([a-z][a-z\s,]+?)(?:\s+(?:before|after|between|no\s|surname|last)|$)",
+            criteria_lower,
+        )
+        if place_match:
+            place = place_match.group(1).strip().rstrip(",")
+            # "born in" → birth only. "from" or "in" → either
+            born_only = "born in" in criteria_lower
+            results = [
+                p for p in results
+                if (place in (p.birth_place or "").lower())
+                or (not born_only and place in (p.death_place or "").lower())
+            ]
+
+        # Year filters
+        before_match = re.search(r"before\s+(\d{4})", criteria_lower)
+        after_match = re.search(r"after\s+(\d{4})", criteria_lower)
+        between_match = re.search(
+            r"between\s+(\d{4})\s+and\s+(\d{4})", criteria_lower
+        )
+
+        if between_match:
+            y1 = int(between_match.group(1))
+            y2 = int(between_match.group(2))
+            results = [
+                p for p in results
+                if self._extract_year(p.birth_date)
+                and y1 <= self._extract_year(p.birth_date) <= y2
+            ]
+        elif before_match:
+            year = int(before_match.group(1))
+            results = [
+                p for p in results
+                if self._extract_year(p.birth_date)
+                and self._extract_year(p.birth_date) < year
+            ]
+        elif after_match:
+            year = int(after_match.group(1))
+            results = [
+                p for p in results
+                if self._extract_year(p.birth_date)
+                and self._extract_year(p.birth_date) > year
+            ]
+
+        # Surname filter
+        surname_match = re.search(
+            r"(?:surname|last name)\s+(\w+)", criteria_lower
+        )
+        if surname_match:
+            surname = surname_match.group(1)
+            results = [
+                p for p in results
+                if surname in p.surname.lower()
+            ]
+
+        # Missing data filters
+        if "no parents" in criteria_lower:
+            results = [
+                p for p in results
+                if not self.tree.get_parents(p.xref)
+            ]
+        if "no death" in criteria_lower:
+            results = [p for p in results if not p.death_date]
+        if "no birth" in criteria_lower:
+            results = [p for p in results if not p.birth_date]
+
+        # Sort by birth year
+        results.sort(
+            key=lambda p: self._extract_year(p.birth_date) or 9999
+        )
+
+        return results
