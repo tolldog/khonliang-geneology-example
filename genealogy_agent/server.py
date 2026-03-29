@@ -132,7 +132,7 @@ def build_server(config: Dict[str, Any]):
             )
 
     research_handler = ResearchChatHandler(
-        research_pool, trigger, librarian=librarian
+        research_pool, trigger, librarian=librarian, tree=tree
     )
 
     server = GenealogyChat(
