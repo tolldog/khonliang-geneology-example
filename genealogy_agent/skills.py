@@ -11,7 +11,7 @@ The intent classifier uses these to route user messages.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List
 
 
 @dataclass
@@ -22,7 +22,10 @@ class Skill:
     description: str
     examples: List[str]
     agent: str  # which agent handles this
-    handler: str = ""  # method name on the agent
+    # Declarative handler name — used for future pipeline dispatch routing,
+    # not currently called directly.  The intent classifier determines routing;
+    # the existing role.handle() does the actual work.
+    handler: str = ""
     output_type: str = "text"  # text, json, list, summary
     needs_postprocess: bool = False  # hand off to another agent after?
     postprocess_agent: str = ""  # which agent post-processes
@@ -120,7 +123,7 @@ GAPS_SKILL = Skill(
         "what data is incomplete",
         "find date errors",
     ],
-    agent="analyst",
+    agent="fact_checker",
     handler="analyze_gaps",
     output_type="text",
 )

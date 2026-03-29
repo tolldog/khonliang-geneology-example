@@ -59,9 +59,11 @@ class IntentClassifier:
     """
 
     # Compound intent connectors
+    # Only connectors that indicate sequential actions — avoid " and " and
+    # " also " which are too ambiguous (e.g. "men and women", "born in Ohio
+    # and Indiana" would be incorrectly split).
     CONNECTORS = [
-        " and then ", " then ", " and ", " also ", ", then ",
-        ". also ", ". then ",
+        " and then ", " then ", ", then ", ". Then ", ". Also ",
     ]
 
     def __init__(
@@ -139,13 +141,13 @@ class IntentClassifier:
 
         text = response.strip()
 
-        # Extract JSON from response
-        json_match = re.search(r"\{[^{}]+\}", text)
-        if not json_match:
+        # Extract JSON from response — use brace matching to handle nested objects
+        json_str = self._extract_json_object(text)
+        if not json_str:
             return None
 
         try:
-            data = json.loads(json_match.group())
+            data = json.loads(json_str)
         except json.JSONDecodeError:
             return None
 
@@ -158,6 +160,37 @@ class IntentClassifier:
             confidence=min(1.0, max(0.0, float(data.get("confidence", 0.5)))),
             extracted=data.get("extracted", {}),
         )
+
+    @staticmethod
+    def _extract_json_object(text: str) -> Optional[str]:
+        """Find the first balanced JSON object in text by matching braces."""
+        start = text.find("{")
+        if start == -1:
+            return None
+        depth = 0
+        in_string = False
+        escape = False
+        for i in range(start, len(text)):
+            ch = text[i]
+            if escape:
+                escape = False
+                continue
+            if ch == "\\":
+                if in_string:
+                    escape = True
+                continue
+            if ch == '"':
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[start : i + 1]
+        return None
 
     def _classify_keywords(self, message: str) -> Optional[Intent]:
         """Fallback keyword-based classification."""
