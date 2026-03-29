@@ -160,7 +160,7 @@ class TreeAnalyzer:
                     person_name=person.full_name,
                     description=f"Missing: {', '.join(missing)}",
                     severity="low" if len(missing) <= 2 else "medium",
-                    research_query=f"{person.full_name} genealogy records",
+                    research_query=f'"{self._search_name(person)}" genealogy records',
                     metadata={"missing_fields": missing},
                 ))
 
