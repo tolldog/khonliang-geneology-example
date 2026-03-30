@@ -211,6 +211,21 @@ class WebSearchResearcher(BaseResearcher):
             scope=task.scope,
         )
 
+    @staticmethod
+    def _clean_person_query(query: str) -> str:
+        """Strip quotes, genealogy keywords, and years from a search query.
+
+        Transforms e.g. '"John Doe" 1850 genealogy' → 'John Doe' so that
+        API backends (WikiTree, Geni) receive only the person's name.
+        """
+        clean = re.sub(r'["\']', '', query)
+        clean = re.sub(
+            r'\b(genealogy|parents|family|born|died|records)\b',
+            '', clean, flags=re.IGNORECASE,
+        )
+        clean = re.sub(r'\b\d{4}\b', '', clean)
+        return clean.strip()
+
     def _search_wikitree(self, name: str):
         """Search WikiTree API, return SearchResult-compatible objects."""
         from genealogy_agent.web_search import SearchResult
@@ -218,9 +233,8 @@ class WebSearchResearcher(BaseResearcher):
         results = []
         try:
             client = self._get_wikitree()
-            # First word = given name, last word = surname
-            # For single-word queries, treat as surname only
-            parts = name.split()
+            clean = self._clean_person_query(name)
+            parts = clean.split()
             if len(parts) >= 2:
                 first = parts[0]
                 last = parts[-1]
@@ -264,11 +278,9 @@ class WebSearchResearcher(BaseResearcher):
             if not client.access_token:
                 return results
 
-            # Clean genealogy keywords from query before passing to Geni
-            clean_name = re.sub(
-                r'\b(genealogy|parents|family|born|died|records)\b',
-                '', name, flags=re.IGNORECASE,
-            ).strip()
+            # Clean quotes, genealogy keywords, and 4-digit years from query
+            # before passing to Geni so the API receives only the person's name.
+            clean_name = self._clean_person_query(name)
             search_results = client.search(names=clean_name or name)
             if search_results:
                 for profile in search_results[:5]:
