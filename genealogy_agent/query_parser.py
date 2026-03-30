@@ -14,7 +14,7 @@ Example:
 """
 
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 from khonliang.parsing.query_parser import QueryParser
 
@@ -100,7 +100,7 @@ GENEALOGY_EXAMPLES = [
     ),
     (
         "tell me about Timothy Toll",
-        '{"name": "Timothy Toll", "action": "lookup"}',
+        '{"name": "Timothy Toll", "action": "narrative"}',
     ),
     (
         "what's the story of the Toll family migration",
@@ -130,12 +130,12 @@ def _genealogy_regex_fallback(message: str) -> Dict[str, Any]:
 
     # Place
     place_match = re.search(
-        r"(?:born in|lived in|from|in)\s+([a-z][a-z\s]+?)(?:\s+(?:before|after|between|no\s|surname|last)|$)",
+        r"(?:born in|lived in|from|in)\s+([a-z][a-z\s]+?)(?:\s+(?:born|before|after|between|no\s|surname|last)|$)",
         msg_lower,
     )
     if place_match:
         params["place"] = place_match.group(1).strip()
-        if "born in" in msg_lower:
+        if "born" in msg_lower:
             params["place_type"] = "birth"
         elif "died in" in msg_lower:
             params["place_type"] = "death"
@@ -183,7 +183,7 @@ def _genealogy_regex_fallback(message: str) -> Dict[str, Any]:
         params["action"] = "research"
     elif "gap" in msg_lower or "dead end" in msg_lower or "missing" in msg_lower:
         params["action"] = "gaps"
-    elif params.get("sex") or params.get("place") or params.get("year_before"):
+    elif params.get("sex") or params.get("place") or params.get("year_before") or params.get("year_after") or params.get("year_between"):
         params["action"] = "query"
     elif params.get("name"):
         params["action"] = "lookup"
