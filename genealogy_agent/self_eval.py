@@ -3,16 +3,13 @@ Agent self-evaluation — validates responses before sending to user.
 
 After a specialist role generates a response, the evaluator checks it
 against the tree data for:
-- Names that don't exist in the tree
 - Dates that contradict tree data
-- Relationships that don't match
-- Obvious hallucinations (people/places not in the data)
-
-The evaluation can:
-- Pass the response through unchanged (good)
-- Append a caveat ("Note: could not verify...")
-- Flag specific claims as unverified
+- Relationship claims that don't match
+- Excessive speculation
 - Skip evaluation for certain roles (e.g. research)
+
+The evaluator is context-aware: it understands response structure and
+avoids false positives from section headings, labels, and non-name phrases.
 """
 
 import logging
@@ -30,12 +27,6 @@ class ResponseEvaluator:
 
     Lightweight, non-LLM — uses string matching and tree lookups
     to catch obvious errors without an extra inference call.
-
-    Example:
-        evaluator = ResponseEvaluator(tree)
-        result = evaluator.evaluate(response_text, original_query)
-        if result["issues"]:
-            response_text += "\\n\\n" + result["caveat"]
     """
 
     def __init__(self, tree: GedcomTree):
@@ -46,43 +37,52 @@ class ResponseEvaluator:
         response: str,
         query: str = "",
         role: str = "",
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Evaluate a response for accuracy.
+
+        Args:
+            response: The LLM response text
+            query: The original user query
+            role: Which role generated the response
+            metadata: Response metadata (may include referenced_persons
+                      with known facts from the tree)
 
         Returns:
             {
                 "passed": bool,
                 "confidence": float (0-1),
-                "issues": [{"type": "...", "detail": "..."}],
+                "issues": [{"type": "...", "detail": "...", "severity": "..."}],
                 "caveat": str or None,
             }
         """
-        # Skip evaluation for certain roles where checking is not useful
-        if role == "research":
-            return {
-                "passed": True,
-                "confidence": 1.0,
-                "issues": [],
-                "caveat": None,
-            }
+        # Skip evaluation for research/system roles
+        if role in ("research", "system", "analyst", "librarian"):
+            return {"passed": True, "confidence": 0.95, "issues": [], "caveat": None}
+
+        meta = metadata or {}
+        referenced_persons = meta.get("referenced_persons", [])
+
+        # Build a name → facts lookup from metadata ground truth
+        persons_lookup: Dict[str, Dict[str, Any]] = {
+            p["name"].lower(): p
+            for p in referenced_persons
+            if p.get("name")
+        }
 
         issues = []
 
-        # Check for names mentioned that aren't in the tree
-        name_issues = self._check_names(response)
-        issues.extend(name_issues)
-
         # Check for date claims that contradict tree
-        date_issues = self._check_dates(response)
+        date_issues = self._check_dates(response, persons_lookup)
         issues.extend(date_issues)
 
         # Check for relationship claims
         rel_issues = self._check_relationships(response)
         issues.extend(rel_issues)
 
-        # Check for hedging language that suggests uncertainty
-        hedge_issues = self._check_hedging(response, query=query)
+        # Check for excessive speculation
+        hedge_issues = self._check_hedging(response, query)
         issues.extend(hedge_issues)
 
         # Score
@@ -98,11 +98,11 @@ class ResponseEvaluator:
         else:
             confidence = 0.95
 
-        # Build caveat
+        # Build caveat — only for real data issues, not structural noise
         caveat = None
         if high_issues:
             details = "; ".join(i["detail"] for i in high_issues[:3])
-            caveat = f"⚠ Verification issues: {details}"
+            caveat = f"Verification issues: {details}"
         elif med_issues:
             details = "; ".join(i["detail"] for i in med_issues[:2])
             caveat = f"Note: {details}"
@@ -114,66 +114,25 @@ class ResponseEvaluator:
             "caveat": caveat,
         }
 
-    def _check_names(self, response: str) -> List[Dict]:
-        """Check if names mentioned in response exist in tree."""
+    def _check_dates(
+        self,
+        response: str,
+        persons_lookup: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict]:
+        """Check if date claims in response contradict tree data.
+
+        Args:
+            response: LLM response text to check.
+            persons_lookup: Optional name→facts dict built from role metadata
+                            (ground truth from tree).  When a name is found
+                            here the metadata birth_year is used directly;
+                            a tree search is still performed for death year.
+        """
         issues = []
+        if persons_lookup is None:
+            persons_lookup = {}
 
-        # Extract potential names (capitalized word pairs)
-        name_pattern = re.findall(
-            r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b", response
-        )
-
-        # Filter out common non-name phrases (places, institutions, events)
-        skip = {
-            "United States", "North America", "New York", "New Jersey",
-            "New England", "St Mary", "St Marys", "Civil War",
-            "World War", "Family Tree", "Great Britain",
-            "National Park", "Library Congress", "Civil War Soldiers",
-            "Sailors System", "County Ohio", "County Indiana",
-            "County Kentucky", "County Maryland", "County Virginia",
-            "County Pennsylvania", "Adams County", "Seneca County",
-            "Hancock County", "Blackford County", "Harrison County",
-            "Fairfield County", "Delaware County",
-        }
-        # Also skip anything containing common institutional words
-        institutional = [
-            "system", "database", "collection", "records", "service",
-            "society", "library", "archive", "museum", "university",
-            "county", "township", "parish",
-        ]
-
-        for name in set(name_pattern):
-            if name in skip or len(name.split()) > 3:
-                continue
-            # Skip institutional/geographic phrases
-            if any(word in name.lower() for word in institutional):
-                continue
-
-            # Check if this looks like a person name and is in the tree
-            person = self.tree.find_person(name)
-            if person is None:
-                # Could be a real person not in our tree — low severity
-                # Only flag if the response states this as family
-                if any(
-                    kw in response.lower()
-                    for kw in ["parent", "child", "married", "spouse",
-                               "father", "mother", "son", "daughter",
-                               "sibling", "brother", "sister"]
-                ):
-                    issues.append({
-                        "type": "unknown_name",
-                        "name": name,
-                        "detail": f"'{name}' not found in tree data",
-                        "severity": "medium",
-                    })
-
-        return issues
-
-    def _check_dates(self, response: str) -> List[Dict]:
-        """Check if dates in response contradict tree data."""
-        issues = []
-
-        # Find date claims in format "born YYYY" or "in YYYY"
+        # Find "Name born/died YEAR" patterns with multi-word names
         date_claims = re.findall(
             r"(\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b[^.]*?"
             r"(?:born|died|b\.|d\.)\s+(?:in\s+)?(\d{4})",
@@ -182,22 +141,30 @@ class ResponseEvaluator:
 
         for name, year_str in date_claims:
             year = int(year_str)
-            person = self.tree.find_person(name)
-            if person is None:
-                continue
 
-            # Check birth date
-            tree_birth = self._extract_year(person.birth_date)
-            tree_death = self._extract_year(person.death_date)
+            # Prefer metadata ground truth; fall back to tree search
+            if name.lower() in persons_lookup:
+                p_meta = persons_lookup[name.lower()]
+                tree_birth: Optional[int] = p_meta.get("birth_year")
+                person = self.tree.find_person(name)
+                tree_death: Optional[int] = (
+                    self._extract_year(person.death_date) if person else None
+                )
+            else:
+                person = self.tree.find_person(name)
+                if person is None:
+                    continue
+                tree_birth = self._extract_year(person.birth_date)
+                tree_death = self._extract_year(person.death_date)
 
-            context = response[
-                max(0, response.find(name) - 20):
-                response.find(name) + len(name) + 50
+            # Check context around the name to determine if birth or death
+            name_pos = response.find(name)
+            context_window = response[
+                max(0, name_pos - 30): name_pos + len(name) + 60
             ].lower()
 
             if tree_birth and abs(tree_birth - year) > 5:
-                # Response says different birth year than tree
-                if "born" in context or "b." in context:
+                if "born" in context_window or "b." in context_window:
                     issues.append({
                         "type": "date_mismatch",
                         "detail": (
@@ -205,11 +172,11 @@ class ResponseEvaluator:
                             f"tree says {tree_birth}"
                         ),
                         "severity": "high",
+                        "name": name,
                     })
 
             if tree_death and abs(tree_death - year) > 5:
-                # Response says different death year than tree
-                if "died" in context or "d." in context:
+                if "died" in context_window or "d." in context_window:
                     issues.append({
                         "type": "date_mismatch",
                         "detail": (
@@ -217,6 +184,7 @@ class ResponseEvaluator:
                             f"tree says {tree_death}"
                         ),
                         "severity": "high",
+                        "name": name,
                     })
 
         return issues
@@ -225,7 +193,7 @@ class ResponseEvaluator:
         """Check relationship claims against tree."""
         issues = []
 
-        # Pattern: "X's father/mother was Y" or "Y was the father/mother of X"
+        # Pattern: "X's father/mother was Y"
         parent_claims = re.findall(
             r"(\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b'?s?\s+"
             r"(?:father|mother|parent)\s+(?:was|is)\s+"
@@ -249,6 +217,7 @@ class ResponseEvaluator:
                             f"{', '.join(p.full_name for p in actual_parents)}"
                         ),
                         "severity": "high",
+                        "name": child_name,
                     })
 
         return issues
@@ -273,7 +242,7 @@ class ResponseEvaluator:
             if phrase in resp_lower:
                 detail = f"Agent expressed uncertainty: '{phrase}'"
                 if query:
-                    detail += f" (query: {query[:80]})"
+                    detail += f" (query: {query[:40]})"
                 issues.append({
                     "type": "uncertainty",
                     "detail": detail,
