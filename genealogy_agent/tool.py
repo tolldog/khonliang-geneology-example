@@ -352,6 +352,28 @@ def cmd_anomalies() -> str:
     return "\n".join(lines)
 
 
+def cmd_report(name: str = "") -> str:
+    """Generate a person report or knowledge report."""
+    from khonliang.knowledge.store import KnowledgeStore
+
+    from genealogy_agent.reports import ReportBuilder
+
+    tree = _get_tree()
+
+    # Try to load knowledge store
+    store = None
+    try:
+        store = KnowledgeStore("data/knowledge.db")
+    except Exception:
+        pass
+
+    builder = ReportBuilder(tree, knowledge_store=store)
+
+    if name:
+        return builder.person_report(name)
+    return builder.knowledge_report()
+
+
 def main():
     if len(sys.argv) < 2:
         print(
@@ -399,6 +421,7 @@ def main():
         ),
         "gaps": lambda: cmd_gaps(args),
         "dead-ends": lambda: cmd_dead_ends(args),
+        "report": lambda: cmd_report(args),
         "anomalies": lambda: cmd_anomalies(),
     }
 
