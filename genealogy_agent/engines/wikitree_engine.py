@@ -5,15 +5,12 @@ Searches WikiTree for person profiles, ancestors, and biographical data.
 No auth required — just an appId for rate limiting.
 """
 
-import logging
 import re
-from typing import Any, Dict, List
+from typing import Any, List
 
 from khonliang.research.engine import BaseEngine, EngineResult
 
 from genealogy_agent.engines.wikitree import WikiTreeClient
-
-logger = logging.getLogger(__name__)
 
 
 class WikiTreeEngine(BaseEngine):

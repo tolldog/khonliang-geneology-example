@@ -10,6 +10,7 @@ Usage:
 import argparse
 import asyncio
 import logging
+import os
 from typing import Any, Dict
 
 from khonliang import ModelPool
@@ -182,8 +183,8 @@ def build_server(config: Dict[str, Any]):
     )
 
     # Research pool
-    import os
-
+    # Credentials read from os.environ — either export them in your shell,
+    # use `export $(cat .env | xargs)`, or load via python-dotenv before starting.
     research_pool = ResearchPool()
     research_pool.register(WebSearchResearcher(
         tree=tree,

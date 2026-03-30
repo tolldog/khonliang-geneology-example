@@ -6,9 +6,8 @@ Requires OAuth2 credentials (GENI_API_KEY, GENI_API_SECRET env vars).
 """
 
 import logging
-import os
 import re
-from typing import Any, Dict, List
+from typing import Any, List
 
 from khonliang.research.engine import BaseEngine, EngineResult
 

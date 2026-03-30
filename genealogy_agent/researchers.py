@@ -72,7 +72,8 @@ class WebSearchResearcher(BaseResearcher):
                 api_key=self._geni_api_key,
                 api_secret=self._geni_api_secret,
             )
-            self._geni.authenticate()
+            if self._geni_api_key and self._geni_api_secret:
+                self._geni.authenticate()
         return self._geni
 
     async def research(self, task: ResearchTask) -> ResearchResult:
@@ -168,7 +169,7 @@ class WebSearchResearcher(BaseResearcher):
             max_workers=len(strategies), thread_name_prefix="lookup"
         ) as pool:
             futures = [pool.submit(fn) for fn in strategies]
-            for future in as_completed(futures, timeout=20):
+            for future in as_completed(futures, timeout=30):
                 try:
                     _collect(future.result())
                 except Exception as e:
@@ -217,9 +218,18 @@ class WebSearchResearcher(BaseResearcher):
         results = []
         try:
             client = self._get_wikitree()
+            # First word = given name, last word = surname
+            # For single-word queries, treat as surname only
             parts = name.split()
-            first = parts[0] if parts else ""
-            last = parts[-1] if len(parts) >= 2 else parts[0] if parts else ""
+            if len(parts) >= 2:
+                first = parts[0]
+                last = parts[-1]
+            elif parts:
+                first = ""
+                last = parts[0]
+            else:
+                first = ""
+                last = ""
 
             search_results = client.search_person(
                 first_name=first, last_name=last
@@ -233,10 +243,11 @@ class WebSearchResearcher(BaseResearcher):
                         f"https://www.wikitree.com/wiki/{wiki_id}"
                         if wiki_id else ""
                     )
+                    formatted = client.format_person(person)
                     results.append(SearchResult(
-                        title=f"WikiTree: {client.format_person(person)}",
+                        title=f"WikiTree: {formatted}",
                         url=url,
-                        snippet=client.format_person(person),
+                        snippet=formatted,
                         source="www.wikitree.com",
                     ))
         except Exception as e:
@@ -253,16 +264,22 @@ class WebSearchResearcher(BaseResearcher):
             if not client.access_token:
                 return results
 
-            search_results = client.search(names=name)
+            # Clean genealogy keywords from query before passing to Geni
+            clean_name = re.sub(
+                r'\b(genealogy|parents|family|born|died|records)\b',
+                '', name, flags=re.IGNORECASE,
+            ).strip()
+            search_results = client.search(names=clean_name or name)
             if search_results:
                 for profile in search_results[:5]:
                     if not isinstance(profile, dict):
                         continue
                     profile_url = profile.get("profile_url", "")
+                    formatted = client.format_profile(profile)
                     results.append(SearchResult(
-                        title=f"Geni: {client.format_profile(profile)}",
+                        title=f"Geni: {formatted}",
                         url=profile_url,
-                        snippet=client.format_profile(profile),
+                        snippet=formatted,
                         source="www.geni.com",
                     ))
         except Exception as e:
