@@ -279,20 +279,26 @@ class NarratorRole(BaseRole):
 
     def _extract_referenced_persons(self, message: str) -> List[Dict]:
         """Extract persons referenced in the query for evaluator context."""
+        import re
+
         persons = []
-        # Find persons mentioned in the message
-        results = self.tree.search_persons(message)
-        for p in results[:10]:
-            year = None
-            if p.birth_date:
-                import re
-                match = re.search(r"\d{4}", p.birth_date)
-                if match:
-                    year = int(match.group())
-            persons.append({
-                "name": p.full_name,
-                "birth_year": year,
-                "birth_place": p.birth_place,
-                "xref": p.xref,
-            })
+        # Extract name-like words and search for each
+        words = message.split()
+        seen = set()
+        for i in range(len(words)):
+            for j in range(i + 1, min(i + 4, len(words) + 1)):
+                name_guess = " ".join(words[i:j])
+                person = self.tree.find_person(name_guess)
+                if person and person.xref not in seen:
+                    seen.add(person.xref)
+                    year = None
+                    match = re.search(r"\d{4}", person.birth_date or "")
+                    if match:
+                        year = int(match.group())
+                    persons.append({
+                        "name": person.full_name,
+                        "birth_year": year,
+                        "birth_place": person.birth_place,
+                        "xref": person.xref,
+                    })
         return persons

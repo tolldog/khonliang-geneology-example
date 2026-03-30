@@ -61,7 +61,7 @@ class ResponseEvaluator:
         if role in ("research", "system", "analyst", "librarian"):
             return {"passed": True, "confidence": 0.95, "issues": [], "caveat": None}
 
-        meta = metadata or {}
+
         issues = []
 
         # Check for date claims that contradict tree
