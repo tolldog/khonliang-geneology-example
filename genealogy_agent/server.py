@@ -10,6 +10,7 @@ Usage:
 import argparse
 import asyncio
 import logging
+import os
 from typing import Any, Dict
 
 from khonliang import ModelPool
@@ -182,8 +183,15 @@ def build_server(config: Dict[str, Any]):
     )
 
     # Research pool
+    # Credentials read from os.environ — either export them in your shell,
+    # use `export $(cat .env | xargs)`, or load via python-dotenv before starting.
     research_pool = ResearchPool()
-    research_pool.register(WebSearchResearcher(tree=tree))
+    research_pool.register(WebSearchResearcher(
+        tree=tree,
+        geni_api_key=os.environ.get("GENI_API_KEY", ""),
+        geni_api_secret=os.environ.get("GENI_API_SECRET", ""),
+        geni_app_id=os.environ.get("GENI_APP_ID", ""),
+    ))
     research_pool.register(TreeResearcher(tree=tree))
     research_pool.set_librarian(librarian)
 
@@ -206,7 +214,7 @@ def build_server(config: Dict[str, Any]):
     roles = {
         "researcher": ResearcherRole(pool, tree=tree),
         "fact_checker": FactCheckerRole(pool, tree=tree),
-        "narrator": NarratorRole(pool, tree=tree),
+        "narrator": NarratorRole(pool, tree=tree, knowledge_store=store),
     }
 
     router = GenealogyRouter()

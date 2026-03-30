@@ -208,21 +208,46 @@ class NarratorRole(BaseRole):
     Turns dry dates and places into engaging family stories.
     """
 
-    def __init__(self, model_pool, tree: GedcomTree, **kwargs):
+    def __init__(self, model_pool, tree: GedcomTree, knowledge_store=None, **kwargs):
         super().__init__(role="narrator", model_pool=model_pool, **kwargs)
         self.tree = tree
+        self.knowledge_store = knowledge_store
         self._system_prompt = (
-            "You are a genealogy storyteller. Transform dry family tree data "
-            "into engaging, readable narratives. Include historical context "
-            "where relevant (wars, migrations, historical events that may have "
-            "affected the family). Stick to facts from the data but weave them "
-            "into a compelling story. Clearly mark any speculation."
+            "You are a genealogy narrator. Your job is to present family tree "
+            "data in a readable, engaging way.\n\n"
+            "STRICT RULES:\n"
+            "1. ONLY state facts that appear in the provided data. Do not invent "
+            "names, dates, places, occupations, or events.\n"
+            "2. If historical context is provided in the KNOWLEDGE section, you "
+            "may weave it into the narrative. Do NOT invent historical context.\n"
+            "3. You may make SIMPLE inferences (e.g., 'the family moved westward' "
+            "if birth places show that pattern) but label them: 'Based on the "
+            "records, it appears that...'\n"
+            "4. Never fabricate county names, military service, causes of death, "
+            "or occupations unless they appear in the data.\n"
+            "5. If you don't have enough data for a rich narrative, say so "
+            "briefly rather than padding with speculation.\n"
+            "6. Format: Use the person's actual dates and places. Organize "
+            "chronologically. Keep it concise."
         )
 
     def build_context(
         self, message: str, context: Optional[Dict[str, Any]] = None
     ) -> str:
-        return _build_multi_context(self.tree, message)
+        # Tree data
+        tree_ctx = _build_multi_context(self.tree, message)
+
+        # Knowledge store data (previously researched facts)
+        knowledge_ctx = ""
+        if self.knowledge_store:
+            knowledge_ctx = self.knowledge_store.build_context(
+                query=message, max_chars=2000, include_axioms=False
+            )
+
+        parts = [tree_ctx]
+        if knowledge_ctx:
+            parts.append(f"\n[KNOWLEDGE]\n{knowledge_ctx}")
+        return "\n".join(parts)
 
     async def handle(
         self,
