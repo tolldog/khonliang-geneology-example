@@ -213,7 +213,7 @@ def build_server(config: Dict[str, Any]):
     roles = {
         "researcher": ResearcherRole(pool, tree=tree),
         "fact_checker": FactCheckerRole(pool, tree=tree),
-        "narrator": NarratorRole(pool, tree=tree),
+        "narrator": NarratorRole(pool, tree=tree, knowledge_store=store),
     }
 
     router = GenealogyRouter()
