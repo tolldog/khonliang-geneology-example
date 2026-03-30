@@ -5,9 +5,15 @@ LLM-backed genealogy research tool — example project demonstrating [ollama-kho
 ## Features
 
 - **GEDCOM parser** — loads standard genealogy files (2,067 persons, 605 families tested)
-- **3 LLM roles** — researcher, fact checker, narrator with smart context injection
+- **3 LLM roles** — researcher, fact checker, narrator with strict grounding rules
+- **Intent classifier** — LLM-based skill detection with compound intent support
+- **Query parser** — natural language to structured filters ("men from Ohio before 1920")
 - **Web search** — DDG + Google + Bing in parallel with relevance filtering
-- **Research pool** — threaded web + tree researchers with capability routing
+- **API engines** — WikiTree and Geni.com searched alongside web engines
+- **Research pool** — threaded researchers with background task queuing
+- **Self-evaluation** — validates responses against tree data, flags date mismatches
+- **Tree analysis** — dead ends, date anomalies, missing data, gap detection
+- **Reports** — person dossiers, knowledge summaries, gap analysis, session reports
 - **Knowledge management** — three-tier RAG (axioms, imported, derived from interactions)
 - **WebSocket chat server** — web UI + CLI client + tool interface
 - **Config-driven** — YAML config for ports, models, themes
@@ -51,6 +57,13 @@ python -m genealogy_agent.chat_client
 | `!tree: name` | Structured tree data lookup |
 | `!ancestors: name` | Ancestor chain |
 | `!migration: name` | Migration timeline |
+| `!researchwho criteria` | Filter tree + batch web research |
+| `!gaps [name]` | Gap analysis (dead ends, anomalies) |
+| `!dead-ends name [research]` | Find dead-end ancestors, auto-research |
+| `!anomalies` | Find date errors in tree |
+| `!report [name]` | Person report or knowledge summary |
+| `!report gaps [name]` | Gap analysis report |
+| `!session` | Session summary |
 | `!ingest title \| content` | Add to knowledge (Tier 2) |
 | `!ingest-file path` | Ingest a file |
 | `!knowledge` | Show knowledge store status |
@@ -100,14 +113,16 @@ Environment variable overrides: `OLLAMA_URL`, `GEDCOM_FILE`, `WS_PORT`, `WEB_POR
 
 ## Architecture
 
-```
+```text
 User (browser/CLI/tool)
   → WebSocket Chat Server
+    → Intent Classifier (LLM-based skill detection)
     → ResearchTrigger (! commands)
     → Router (keyword matching)
     → Specialist Role (LLM inference)
+    → Self-Evaluator (checks against tree data)
     → Librarian (auto-indexes responses to Tier 3)
-    → Research Pool (web search, tree lookups)
+    → Research Pool (DDG + Google + Bing + WikiTree + Geni)
 ```
 
 ## License
