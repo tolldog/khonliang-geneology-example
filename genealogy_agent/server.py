@@ -91,8 +91,12 @@ class GenealogyChat(ChatServer):
             response_text = resp.get("content", "")
             role = resp.get("role", "")
 
+            resp_metadata = resp.get("metadata", {})
             evaluation = self.evaluator.evaluate(
-                response_text, query=content, role=role
+                response_text,
+                query=content,
+                role=role,
+                metadata=resp_metadata,
             )
 
             # Append caveat if issues found

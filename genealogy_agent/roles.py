@@ -256,6 +256,10 @@ class NarratorRole(BaseRole):
         context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         ctx = self.build_context(message, context)
+
+        # Collect facts that went into the context — evaluator checks these
+        referenced_persons = self._extract_referenced_persons(message)
+
         prompt = (
             f"Family tree data:\n{ctx}\n\n"
             f"Request: {message}\n\nNarrative:"
@@ -269,5 +273,26 @@ class NarratorRole(BaseRole):
             "metadata": {
                 "role": self.role,
                 "generation_time_ms": elapsed_ms,
+                "referenced_persons": referenced_persons,
             },
         }
+
+    def _extract_referenced_persons(self, message: str) -> List[Dict]:
+        """Extract persons referenced in the query for evaluator context."""
+        persons = []
+        # Find persons mentioned in the message
+        results = self.tree.search_persons(message)
+        for p in results[:10]:
+            year = None
+            if p.birth_date:
+                import re
+                match = re.search(r"\d{4}", p.birth_date)
+                if match:
+                    year = int(match.group())
+            persons.append({
+                "name": p.full_name,
+                "birth_year": year,
+                "birth_place": p.birth_place,
+                "xref": p.xref,
+            })
+        return persons
