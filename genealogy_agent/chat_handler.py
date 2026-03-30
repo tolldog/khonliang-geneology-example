@@ -41,6 +41,8 @@ class ResearchChatHandler:
         "!gaps", "!dead-ends", "!anomalies",
         # Batch research
         "!researchwho",
+        # Reports
+        "!report", "!session",
         # Knowledge management
         "!knowledge", "!prune", "!promote", "!demote",
         "!axiom",
@@ -95,6 +97,12 @@ class ResearchChatHandler:
             return self._handle_anomalies()
         if msg_lower.startswith("!researchwho"):
             return await self._handle_researchwho(message)
+
+        # Reports
+        if msg_lower.startswith("!report"):
+            return self._handle_report(message)
+        if msg_lower.startswith("!session"):
+            return self._handle_session_report()
 
         # Ingestion commands
         if msg_lower.startswith("!ingest-file"):
@@ -739,6 +747,74 @@ class ResearchChatHandler:
                 "queued": queued,
                 "criteria": criteria,
             },
+        }
+
+    # ------------------------------------------------------------------
+    # Reports
+    # ------------------------------------------------------------------
+
+    def _handle_report(self, message: str) -> Dict[str, Any]:
+        """
+        Generate a report.
+        !report — knowledge report
+        !report <name> — person report
+        !report gaps — gap analysis
+        !report gaps <name> — person-specific gap analysis
+        """
+        if not self.tree:
+            return {"type": "error", "content": "No tree loaded."}
+
+        from genealogy_agent.reports import ReportBuilder
+
+        builder = ReportBuilder(
+            self.tree,
+            knowledge_store=self.librarian.store if self.librarian else None,
+        )
+
+        text = message.split(None, 1)[1].strip() if " " in message else ""
+
+        if not text:
+            return {
+                "type": "response",
+                "content": builder.knowledge_report(),
+                "role": "analyst",
+                "reason": "knowledge_report",
+            }
+
+        if text.lower().startswith("gaps"):
+            name = text[4:].strip() if len(text) > 4 else ""
+            return {
+                "type": "response",
+                "content": builder.gap_report(name or None),
+                "role": "analyst",
+                "reason": "gap_report",
+            }
+
+        # Person report
+        return {
+            "type": "response",
+            "content": builder.person_report(text),
+            "role": "analyst",
+            "reason": "person_report",
+        }
+
+    def _handle_session_report(self) -> Dict[str, Any]:
+        """Generate a session summary."""
+        if not self.tree:
+            return {"type": "error", "content": "No tree loaded."}
+
+        from genealogy_agent.reports import ReportBuilder
+
+        builder = ReportBuilder(
+            self.tree,
+            knowledge_store=self.librarian.store if self.librarian else None,
+        )
+
+        return {
+            "type": "response",
+            "content": builder.session_report(),
+            "role": "analyst",
+            "reason": "session_report",
         }
 
     def get_status(self) -> Dict[str, Any]:
