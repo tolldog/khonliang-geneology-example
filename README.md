@@ -141,6 +141,48 @@ User (browser/CLI/tool)
 
 **Intent classification** uses a fast LLM (llama3.2:3b) to detect skills from natural language. Supports compound intents like "find John Smith and then write a narrative" which chains lookup + narrator.
 
+**Model routing** uses complexity classification to pick the right model size per query. Simple lookups stay on the fast 3b model; complex narratives can escalate to larger models.
+
+## MCP Server (for Claude Code / external LLMs)
+
+The genealogy MCP server exposes tree queries and knowledge tools so external LLMs can interact with the family tree directly.
+
+```bash
+# Run MCP server (stdio for Claude Code)
+python -m genealogy_agent.mcp_server
+
+# Or HTTP for remote access
+python -m genealogy_agent.mcp_server --transport http --port 8080
+```
+
+Add to `.mcp.json` for Claude Code:
+
+```json
+{
+  "mcpServers": {
+    "genealogy": {
+      "command": "python",
+      "args": ["-m", "genealogy_agent.mcp_server"]
+    }
+  }
+}
+```
+
+### Tree Tools
+
+| Tool | Description |
+|------|-------------|
+| `tree_summary` | Tree statistics (person count, families, date range) |
+| `tree_search(query)` | Search persons by name |
+| `tree_person(name)` | Detailed person info with family |
+| `tree_ancestors(name, generations)` | Ancestor chain |
+| `tree_descendants(name, generations)` | Descendant chain |
+| `tree_migration(name)` | Migration timeline through ancestor line |
+| `tree_context(name)` | Raw LLM context for a person |
+| `tree_gaps(name)` | Gap analysis and research opportunities |
+
+Plus all khonliang tools: `knowledge_search`, `knowledge_ingest`, `triple_add`, `blackboard_post`, `invoke_role`, etc.
+
 ## License
 
 MIT

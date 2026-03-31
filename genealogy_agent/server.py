@@ -14,9 +14,12 @@ import os
 from typing import Any, Dict
 
 from khonliang import ModelPool
+from khonliang.client import OllamaClient
 from khonliang.integrations.websocket_chat import ChatServer
 from khonliang.knowledge import KnowledgeStore, Librarian
 from khonliang.research import ResearchPool, ResearchTrigger
+
+from khonliang.routing import ComplexityStrategy, ModelRouter
 
 from genealogy_agent.chat_handler import ResearchChatHandler
 from genealogy_agent.config import load_config
@@ -262,10 +265,33 @@ def build_server(config: Dict[str, Any]):
         },
     )
 
+    # Model router — pick model size based on query complexity.
+    # Uses the fast researcher model as the classifier.
+    # Simple lookups stay on the 3b, complex queries escalate.
+    models_config = config["ollama"]["models"]
+    role_models = {}
+    for role_name, model in models_config.items():
+        # Build tier list: configured model + any larger alternatives
+        role_models[role_name] = [model]
+
+    classifier_client = OllamaClient(
+        model=models_config.get("researcher", "llama3.2:3b"),
+        base_url=config["ollama"]["url"],
+    )
+    model_router = ModelRouter(
+        role_models=role_models,
+        strategy=ComplexityStrategy(
+            classifier_client=classifier_client,
+            classifier_model=models_config.get("researcher", "llama3.2:3b"),
+        ),
+    )
+
     roles = {
-        "researcher": ResearcherRole(pool, tree=tree),
-        "fact_checker": FactCheckerRole(pool, tree=tree),
-        "narrator": NarratorRole(pool, tree=tree, knowledge_store=store),
+        "researcher": ResearcherRole(pool, tree=tree, model_router=model_router),
+        "fact_checker": FactCheckerRole(pool, tree=tree, model_router=model_router),
+        "narrator": NarratorRole(
+            pool, tree=tree, knowledge_store=store, model_router=model_router
+        ),
     }
 
     router = GenealogyRouter()
@@ -293,13 +319,11 @@ def build_server(config: Dict[str, Any]):
     evaluator = create_genealogy_evaluator(tree)
 
     # Intent classifier (uses fast model for natural language understanding)
-    from khonliang.client import OllamaClient
-
-    classifier_client = OllamaClient(
+    intent_client = OllamaClient(
         model="llama3.2:3b", base_url=config["ollama"]["url"]
     )
     intent_classifier = IntentClassifier(
-        ollama_client=classifier_client, model="llama3.2:3b"
+        ollama_client=intent_client, model="llama3.2:3b"
     )
 
     server = GenealogyChat(
