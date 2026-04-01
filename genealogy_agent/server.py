@@ -24,9 +24,16 @@ from khonliang.research import ResearchPool, ResearchTrigger
 from khonliang.routing import ComplexityStrategy, ModelRouter
 from khonliang.training import FeedbackStore, HeuristicPool
 
+from khonliang.knowledge.triples import TripleStore
+
 from genealogy_agent.chat_handler import ResearchChatHandler
 from genealogy_agent.config import load_config
 from genealogy_agent.consensus import create_consensus_team, create_debate_orchestrator
+from genealogy_agent.cross_matcher import CrossMatcher
+from genealogy_agent.forest import TreeForest, load_forest_from_config
+from genealogy_agent.importer import GedcomImporter
+from genealogy_agent.match_agent import MatchAgentRole, MatchVotingAgent
+from genealogy_agent.merge import MergeEngine
 from genealogy_agent.report_server import get_detector, publish_report, start_report_server
 from genealogy_agent.gedcom_parser import GedcomTree
 from genealogy_agent.intent import IntentClassifier
@@ -447,12 +454,15 @@ class GenealogyChat(ChatServer):
 def build_server(config: Dict[str, Any]):
     """Build the full genealogy chat server with research pool."""
 
-    tree = GedcomTree.from_file(config["app"]["gedcom"])
+    # Multi-tree forest (backward compat with single gedcom)
+    forest = load_forest_from_config(config)
+    tree = forest.default_tree
 
     # Knowledge
     knowledge_db = config["app"]["knowledge_db"]
     store = KnowledgeStore(knowledge_db)
     librarian = Librarian(store)
+    triple_store = TripleStore(knowledge_db)
 
     # Training: feedback store + heuristic pool
     feedback_store = None
@@ -563,6 +573,15 @@ def build_server(config: Dict[str, Any]):
         consensus_team = create_consensus_team(roles, tree, config)
         debate_orchestrator = create_debate_orchestrator(roles, tree, config)
 
+    # Match agent + cross matcher + importer + merge
+    match_role = MatchAgentRole(
+        pool, forest=forest, triple_store=triple_store,
+        heuristic_pool=heuristic_pool, model_router=model_router,
+    )
+    cross_matcher = CrossMatcher(forest)
+    merge_engine = MergeEngine(forest, triple_store=triple_store)
+    importer = GedcomImporter(forest, cross_matcher=cross_matcher)
+
     # Wire up the chat message handler with trigger checking
     def on_message(session_id, msg, response, role):
         logger.info(f"[{session_id}] {role}: {msg[:60]}")
@@ -579,7 +598,10 @@ def build_server(config: Dict[str, Any]):
             )
 
     research_handler = ResearchChatHandler(
-        research_pool, trigger, librarian=librarian, tree=tree
+        research_pool, trigger, librarian=librarian, tree=tree,
+        forest=forest, cross_matcher=cross_matcher,
+        match_agent=match_role, importer=importer,
+        merge_engine=merge_engine, triple_store=triple_store,
     )
 
     # Self-evaluation using khonliang BaseEvaluator + genealogy rules

@@ -48,6 +48,9 @@ class ResearchChatHandler:
         # Knowledge management
         "!knowledge", "!prune", "!promote", "!demote",
         "!axiom",
+        # Multi-tree / matching
+        "!load", "!trees", "!scan", "!matches", "!link",
+        "!merge", "!export", "!import",
     }
 
     def __init__(
@@ -58,6 +61,12 @@ class ResearchChatHandler:
         tree: Optional[Any] = None,
         poll_interval: float = 0.5,
         poll_timeout: float = 30.0,
+        forest: Optional[Any] = None,
+        cross_matcher: Optional[Any] = None,
+        match_agent: Optional[Any] = None,
+        importer: Optional[Any] = None,
+        merge_engine: Optional[Any] = None,
+        triple_store: Optional[Any] = None,
     ):
         self.pool = pool
         self.trigger = trigger
@@ -65,6 +74,12 @@ class ResearchChatHandler:
         self.tree = tree
         self.poll_interval = poll_interval
         self.poll_timeout = poll_timeout
+        self.forest = forest
+        self.cross_matcher = cross_matcher
+        self.match_agent = match_agent
+        self.importer = importer
+        self.merge_engine = merge_engine
+        self.triple_store = triple_store
 
     def is_command(self, message: str) -> bool:
         """Check if a message is any ! command."""
@@ -125,6 +140,24 @@ class ResearchChatHandler:
             return self._handle_demote(message)
         if msg_lower.startswith("!axiom"):
             return self._handle_axiom(message)
+
+        # Multi-tree / matching commands
+        if msg_lower.startswith("!load"):
+            return self._handle_load(message)
+        if msg_lower.startswith("!trees"):
+            return self._handle_trees()
+        if msg_lower.startswith("!scan"):
+            return await self._handle_scan(message)
+        if msg_lower.startswith("!matches"):
+            return self._handle_matches(message)
+        if msg_lower.startswith("!link"):
+            return self._handle_link(message)
+        if msg_lower.startswith("!merge"):
+            return self._handle_merge(message)
+        if msg_lower.startswith("!export"):
+            return self._handle_export(message)
+        if msg_lower.startswith("!import"):
+            return self._handle_import(message)
 
         return {"type": "error", "content": f"Unknown command: {message[:30]}"}
 
@@ -858,4 +891,285 @@ class ResearchChatHandler:
         return {
             "pool": self.pool.get_status(),
             "researchers": self.pool.list_researchers(),
+        }
+
+    # ------------------------------------------------------------------
+    # Multi-tree / matching commands
+    # ------------------------------------------------------------------
+
+    def _handle_load(self, message: str) -> Dict[str, Any]:
+        """!load name path.ged — import a GEDCOM file into the forest."""
+        if not self.importer:
+            return {"type": "error", "content": "Importer not configured."}
+
+        parts = message.split(None, 2)
+        if len(parts) < 3:
+            return {
+                "type": "response",
+                "content": "Usage: !load <name> <path.ged>",
+                "role": "system",
+            }
+
+        name = parts[1]
+        path = parts[2]
+        result = self.importer.import_file(path, name=name)
+        return {
+            "type": "response",
+            "content": result.display,
+            "role": "system",
+            "reason": "import",
+        }
+
+    def _handle_trees(self) -> Dict[str, Any]:
+        """!trees — list all loaded trees."""
+        if not self.forest:
+            return {"type": "error", "content": "Forest not configured."}
+
+        return {
+            "type": "response",
+            "content": self.forest.get_summary(),
+            "role": "system",
+            "reason": "tree_list",
+        }
+
+    async def _handle_scan(self, message: str) -> Dict[str, Any]:
+        """!scan [tree_a] [tree_b] [min_score] — cross-tree matching."""
+        if not self.cross_matcher or not self.forest:
+            return {"type": "error", "content": "Cross-matcher not configured."}
+
+        parts = message.split()
+        tree_names = self.forest.tree_names
+
+        if len(parts) >= 3:
+            tree_a, tree_b = parts[1], parts[2]
+        elif len(tree_names) == 2:
+            tree_a, tree_b = tree_names[0], tree_names[1]
+        else:
+            return {
+                "type": "response",
+                "content": (
+                    "Usage: !scan <tree_a> <tree_b> [min_score]\n"
+                    f"Available trees: {', '.join(tree_names)}"
+                ),
+                "role": "system",
+            }
+
+        min_score = 0.6
+        if len(parts) >= 4:
+            try:
+                min_score = float(parts[3])
+            except ValueError:
+                pass
+
+        candidates = self.cross_matcher.scan(tree_a, tree_b, min_score=min_score)
+
+        if not candidates:
+            return {
+                "type": "response",
+                "content": f"No matches found between '{tree_a}' and '{tree_b}' above {min_score:.0%}.",
+                "role": "analyst",
+            }
+
+        # Store candidates as possible_match triples
+        if self.triple_store:
+            for c in candidates:
+                self.triple_store.add(
+                    subject=c.person_a.qualified_xref,
+                    predicate="possible_match",
+                    obj=c.person_b.qualified_xref,
+                    confidence=c.score,
+                    source="cross_matcher",
+                )
+
+        # LLM evaluation of top candidates
+        evaluated = []
+        if self.match_agent and candidates:
+            top = candidates[:5]
+            for c in top:
+                try:
+                    assessment = await self.match_agent.evaluate_match(
+                        c.person_a, c.person_b
+                    )
+                    evaluated.append((c, assessment))
+                except Exception:
+                    logger.debug("Match evaluation failed", exc_info=True)
+
+        # Format results
+        lines = [f"Cross-match: {tree_a} vs {tree_b} — {len(candidates)} candidates\n"]
+        if evaluated:
+            lines.append("**Agent-evaluated matches:**")
+            for c, assessment in evaluated:
+                lines.append(
+                    f"  {c.person_a.person.full_name} <-> "
+                    f"{c.person_b.person.full_name}  "
+                    f"heuristic={c.score:.0%}  "
+                    f"agent={assessment.confidence:.0%} ({assessment.verdict})  "
+                    f"rec: {assessment.recommendation}"
+                )
+            lines.append("")
+
+        lines.append("**All heuristic matches:**")
+        for c in candidates[:20]:
+            conflict_str = f" [{', '.join(c.conflicts)}]" if c.conflicts else ""
+            lines.append(f"  {c.display}{conflict_str}")
+
+        if len(candidates) > 20:
+            lines.append(f"  ... and {len(candidates) - 20} more")
+
+        return {
+            "type": "response",
+            "content": "\n".join(lines),
+            "role": "analyst",
+            "reason": "cross_match_scan",
+            "metadata": {"candidates": len(candidates), "evaluated": len(evaluated)},
+        }
+
+    def _handle_matches(self, message: str) -> Dict[str, Any]:
+        """!matches [name] — show pending match candidates from TripleStore."""
+        if not self.triple_store:
+            return {"type": "error", "content": "Triple store not configured."}
+
+        parts = message.split(None, 1)
+        query = parts[1] if len(parts) > 1 else None
+
+        # Query for possible_match and same_as triples
+        matches = self.triple_store.get(predicate="possible_match", limit=30)
+        confirmed = self.triple_store.get(predicate="same_as", limit=30)
+
+        if query:
+            matches = [m for m in matches if query.lower() in m.subject.lower() or query.lower() in m.object.lower()]
+            confirmed = [m for m in confirmed if query.lower() in m.subject.lower() or query.lower() in m.object.lower()]
+
+        lines = []
+        if confirmed:
+            lines.append(f"**Confirmed matches ({len(confirmed)}):**")
+            for t in confirmed:
+                lines.append(f"  {t.subject} = {t.object} ({t.confidence:.0%}, {t.source})")
+            lines.append("")
+
+        if matches:
+            lines.append(f"**Pending candidates ({len(matches)}):**")
+            for t in matches:
+                lines.append(f"  {t.subject} <-> {t.object} ({t.confidence:.0%}, {t.source})")
+        elif not confirmed:
+            lines.append("No match candidates found. Run !scan first.")
+
+        return {
+            "type": "response",
+            "content": "\n".join(lines) or "No matches found.",
+            "role": "analyst",
+            "reason": "match_list",
+        }
+
+    def _handle_link(self, message: str) -> Dict[str, Any]:
+        """!link qxref_a qxref_b — confirm a match as same_as."""
+        if not self.triple_store:
+            return {"type": "error", "content": "Triple store not configured."}
+
+        parts = message.split()
+        if len(parts) < 3:
+            return {
+                "type": "response",
+                "content": "Usage: !link <tree:@I1@> <tree:@I2@>",
+                "role": "system",
+            }
+
+        qxref_a, qxref_b = parts[1], parts[2]
+
+        # Upgrade to same_as
+        self.triple_store.add(
+            subject=qxref_a,
+            predicate="same_as",
+            obj=qxref_b,
+            confidence=1.0,
+            source="user_confirmed",
+        )
+
+        # Remove possible_match if it exists
+        self.triple_store.remove(
+            subject=qxref_a, predicate="possible_match", obj=qxref_b
+        )
+
+        return {
+            "type": "response",
+            "content": f"Confirmed: {qxref_a} = {qxref_b}",
+            "role": "system",
+            "reason": "match_confirmed",
+        }
+
+    def _handle_merge(self, message: str) -> Dict[str, Any]:
+        """!merge source_qxref into target_qxref [strategy] — merge person data."""
+        if not self.merge_engine:
+            return {"type": "error", "content": "Merge engine not configured."}
+
+        # Parse: !merge tree:@I1@ into tree:@I2@ [prefer_target|prefer_source|merge_all]
+        parts = message.split()
+        if len(parts) < 4 or parts[2].lower() != "into":
+            return {
+                "type": "response",
+                "content": "Usage: !merge <source> into <target> [strategy]",
+                "role": "system",
+            }
+
+        source_qxref = parts[1]
+        target_qxref = parts[3]
+        strategy = parts[4] if len(parts) > 4 else "prefer_target"
+
+        result = self.merge_engine.merge_person(source_qxref, target_qxref, strategy)
+        return {
+            "type": "response",
+            "content": result.display,
+            "role": "analyst",
+            "reason": "merge",
+        }
+
+    def _handle_export(self, message: str) -> Dict[str, Any]:
+        """!export tree_name [path] — export tree to GEDCOM."""
+        if not self.importer:
+            return {"type": "error", "content": "Importer not configured."}
+
+        parts = message.split(None, 2)
+        if len(parts) < 2:
+            return {
+                "type": "response",
+                "content": "Usage: !export <tree_name> [output_path]",
+                "role": "system",
+            }
+
+        tree_name = parts[1]
+        path = parts[2] if len(parts) > 2 else f"data/{tree_name}_export.ged"
+
+        try:
+            output = self.importer.export_gedcom(tree_name, path)
+            return {
+                "type": "response",
+                "content": f"Exported '{tree_name}' to {output}",
+                "role": "system",
+                "reason": "export",
+            }
+        except ValueError as e:
+            return {"type": "error", "content": str(e)}
+
+    def _handle_import(self, message: str) -> Dict[str, Any]:
+        """!import path [name] — import GEDCOM with sanity checking."""
+        if not self.importer:
+            return {"type": "error", "content": "Importer not configured."}
+
+        parts = message.split(None, 2)
+        if len(parts) < 2:
+            return {
+                "type": "response",
+                "content": "Usage: !import <path.ged> [name]",
+                "role": "system",
+            }
+
+        path = parts[1]
+        name = parts[2] if len(parts) > 2 else None
+
+        result = self.importer.import_file(path, name=name)
+        return {
+            "type": "response",
+            "content": result.display,
+            "role": "system",
+            "reason": "import",
         }

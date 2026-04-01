@@ -8,6 +8,7 @@ server:
 app:
   title: "Genealogy Agent"
   gedcom: "data/Toll Family Tree.ged"
+  gedcoms: {}                              # name: path pairs for multi-tree
   knowledge_db: "data/knowledge.db"
 
 ollama:
@@ -16,6 +17,13 @@ ollama:
     researcher: "llama3.2:3b"
     fact_checker: "qwen2.5:7b"
     narrator: "llama3.1:8b"
+    match_agent: "qwen2.5:7b"
+
+matching:
+  auto_scan: false
+  min_heuristic_score: 0.6
+  min_agent_confidence: 0.75
+  max_scan_results: 50
 
 personalities:
   enabled: true

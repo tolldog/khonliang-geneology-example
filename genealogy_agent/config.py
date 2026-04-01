@@ -45,6 +45,15 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
         config["server"]["web_port"] = int(os.environ["WEB_PORT"])
     if os.environ.get("APP_TITLE"):
         config["app"]["title"] = os.environ["APP_TITLE"]
+    if os.environ.get("GEDCOM_FILES"):
+        # Format: name1=path1,name2=path2
+        gedcoms = {}
+        for pair in os.environ["GEDCOM_FILES"].split(","):
+            if "=" in pair:
+                name, path = pair.strip().split("=", 1)
+                gedcoms[name.strip()] = path.strip()
+        if gedcoms:
+            config["app"]["gedcoms"] = gedcoms
 
     return config
 
@@ -59,6 +68,7 @@ def _defaults() -> Dict[str, Any]:
         "app": {
             "title": "Genealogy Agent",
             "gedcom": "data/Toll Family Tree.ged",
+            "gedcoms": {},
             "knowledge_db": "data/knowledge.db",
         },
         "ollama": {
@@ -67,7 +77,28 @@ def _defaults() -> Dict[str, Any]:
                 "researcher": "llama3.2:3b",
                 "fact_checker": "qwen2.5:7b",
                 "narrator": "llama3.1:8b",
+                "match_agent": "qwen2.5:7b",
             },
+        },
+        "matching": {
+            "auto_scan": False,
+            "min_heuristic_score": 0.6,
+            "min_agent_confidence": 0.75,
+            "max_scan_results": 50,
+        },
+        "personalities": {
+            "enabled": True,
+        },
+        "consensus": {
+            "enabled": True,
+            "timeout": 30,
+            "debate_enabled": True,
+            "debate_rounds": 2,
+            "disagreement_threshold": 0.6,
+        },
+        "training": {
+            "feedback_enabled": True,
+            "heuristics_enabled": True,
         },
         "theme": {
             "primary": "#e94560",

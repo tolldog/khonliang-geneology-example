@@ -30,15 +30,30 @@ class GenealogyMCPServer(KhonliangMCPServer):
 
     Extends the generic khonliang MCP server with GEDCOM tree queries,
     ancestor/descendant chains, migration timelines, and gap analysis.
+    Also exposes feedback, heuristic, and personality tools.
     """
 
-    def __init__(self, tree: GedcomTree, **kwargs):
+    def __init__(
+        self, tree: GedcomTree, feedback_store=None,
+        heuristic_pool=None, personality_registry=None,
+        forest=None, cross_matcher=None, match_agent=None,
+        importer=None, **kwargs
+    ):
         super().__init__(**kwargs)
         self.tree = tree
+        self.feedback_store = feedback_store
+        self.heuristic_pool = heuristic_pool
+        self.personality_registry = personality_registry
+        self.forest = forest
+        self.cross_matcher = cross_matcher
+        self.match_agent = match_agent
+        self.importer = importer
 
     def create_app(self):
         app = super().create_app()
         self._register_tree_tools(app)
+        self._register_training_tools(app)
+        self._register_forest_tools(app)
         return app
 
     def _register_tree_tools(self, app) -> None:
@@ -170,6 +185,120 @@ class GenealogyMCPServer(KhonliangMCPServer):
             """Family tree summary statistics."""
             return tree.get_summary()
 
+    def _register_training_tools(self, app) -> None:
+        feedback_store = self.feedback_store
+        heuristic_pool = self.heuristic_pool
+        personality_registry = self.personality_registry
+
+        if feedback_store:
+            @app.tool()
+            def feedback_stats() -> str:
+                """Get interaction and feedback statistics (total interactions, ratings breakdown)."""
+                stats = feedback_store.get_stats()
+                return json.dumps(stats, indent=2, default=str)
+
+        if heuristic_pool:
+            @app.tool()
+            def heuristic_list() -> str:
+                """List learned heuristic rules extracted from interaction outcomes."""
+                rules = heuristic_pool.get_heuristics(min_confidence=0.0)
+                if not rules:
+                    return "No heuristics learned yet."
+                lines = [f"Learned rules ({len(rules)}):"]
+                for h in rules:
+                    lines.append(
+                        f"  [{h.confidence:.0%}] {h.rule} "
+                        f"(samples={h.sample_count})"
+                    )
+                return "\n".join(lines)
+
+        if personality_registry:
+            @app.tool()
+            def personality_list() -> str:
+                """List available personalities for @mention routing."""
+                personalities = personality_registry.list_enabled()
+                if not personalities:
+                    return "No personalities configured."
+                lines = ["Available personalities:"]
+                for p in personalities:
+                    aliases = ", ".join(p.aliases) if p.aliases else "none"
+                    lines.append(
+                        f"  @{p.id} — {p.name} ({p.description}) "
+                        f"[weight={p.voting_weight:.0%}, aliases={aliases}]"
+                    )
+                return "\n".join(lines)
+
+
+    def _register_forest_tools(self, app) -> None:
+        forest = self.forest
+        cross_matcher = self.cross_matcher
+        importer = self.importer
+
+        if forest:
+            @app.tool()
+            def forest_list() -> str:
+                """List all loaded family trees with person and family counts."""
+                return forest.get_summary()
+
+            @app.tool()
+            def forest_search(query: str, tree_name: str = "") -> str:
+                """Search for persons across all trees (or a specific tree)."""
+                if tree_name:
+                    qp = forest.find_person(query, tree_name=tree_name)
+                    if qp:
+                        return json.dumps(qp.to_dict(), indent=2)
+                    return f"No person matching '{query}' in tree '{tree_name}'."
+                results = forest.search_all(query)
+                if not results:
+                    return f"No persons found matching: {query}"
+                lines = [f"Found {len(results)} persons across {len(forest)} trees:"]
+                for qp in results[:30]:
+                    lines.append(f"  {qp.display}")
+                return "\n".join(lines)
+
+        if cross_matcher and forest:
+            @app.tool()
+            def match_scan(tree_a: str, tree_b: str, min_score: float = 0.6) -> str:
+                """Run heuristic cross-matching between two trees to find potential person matches."""
+                candidates = cross_matcher.scan(tree_a, tree_b, min_score=min_score)
+                if not candidates:
+                    return f"No matches found between '{tree_a}' and '{tree_b}' above {min_score:.0%}."
+                lines = [f"Found {len(candidates)} match candidates:"]
+                for c in candidates[:20]:
+                    lines.append(f"  {c.display}")
+                return "\n".join(lines)
+
+            @app.tool()
+            def match_confirm(xref_a: str, xref_b: str) -> str:
+                """Confirm a match between two qualified xrefs (e.g., 'toll:@I1@'), storing as same_as triple."""
+                ts = self.triple_store
+                if not ts:
+                    return "Triple store not configured."
+                ts.add(
+                    subject=xref_a, predicate="same_as",
+                    obj=xref_b, confidence=1.0, source="mcp_confirmed",
+                )
+                ts.remove(subject=xref_a, predicate="possible_match", obj=xref_b)
+                return f"Confirmed: {xref_a} = {xref_b}"
+
+        if importer and forest:
+            @app.tool()
+            def import_gedcom(path: str, name: str = "") -> str:
+                """Import a GEDCOM file with sanity checking. Returns import status and any issues found."""
+                result = importer.import_file(path, name=name or None)
+                return result.display
+
+            @app.tool()
+            def export_gedcom(tree_name: str, path: str = "") -> str:
+                """Export a tree back to GEDCOM format."""
+                if not path:
+                    path = f"data/{tree_name}_export.ged"
+                try:
+                    output = importer.export_gedcom(tree_name, path)
+                    return f"Exported to {output}"
+                except ValueError as e:
+                    return str(e)
+
 
 def main():
     parser = argparse.ArgumentParser(description="Genealogy MCP server")
@@ -189,16 +318,46 @@ def main():
 
     config = load_config(args.config)
 
-    tree = GedcomTree.from_file(config["app"]["gedcom"])
-    store = KnowledgeStore(config["app"].get("knowledge_db", "data/knowledge.db"))
-    triples = TripleStore(config["app"].get("knowledge_db", "data/knowledge.db"))
+    from khonliang.training import FeedbackStore, HeuristicPool
+    from genealogy_agent.forest import load_forest_from_config
+    from genealogy_agent.cross_matcher import CrossMatcher
+    from genealogy_agent.importer import GedcomImporter
+    from genealogy_agent.personalities import create_genealogy_registry
+
+    forest = load_forest_from_config(config)
+    tree = forest.default_tree
+
+    knowledge_db = config["app"].get("knowledge_db", "data/knowledge.db")
+    store = KnowledgeStore(knowledge_db)
+    triples = TripleStore(knowledge_db)
     board = Blackboard()
+
+    # Training components
+    feedback_store = None
+    heuristic_pool = None
+    personality_registry = None
+    if config.get("training", {}).get("feedback_enabled", True):
+        feedback_store = FeedbackStore(db_path=knowledge_db)
+    if config.get("training", {}).get("heuristics_enabled", True):
+        heuristic_pool = HeuristicPool(db_path=knowledge_db)
+    if config.get("personalities", {}).get("enabled", True):
+        personality_registry = create_genealogy_registry()
+
+    # Multi-tree components
+    cross_matcher = CrossMatcher(forest)
+    importer = GedcomImporter(forest, cross_matcher=cross_matcher)
 
     server = GenealogyMCPServer(
         tree=tree,
         knowledge_store=store,
         triple_store=triples,
         blackboard=board,
+        feedback_store=feedback_store,
+        heuristic_pool=heuristic_pool,
+        personality_registry=personality_registry,
+        forest=forest,
+        cross_matcher=cross_matcher,
+        importer=importer,
     )
 
     app = server.create_app()

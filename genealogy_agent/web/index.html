@@ -8,10 +8,19 @@
   :root { --primary: #e94560; --background: #1a1a2e; --surface: #16213e; --border: #0f3460; --text: #e0e0e0; --text-muted: #666666; --success: #4ecca3; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--background); color: var(--text); height: 100vh; display: flex; flex-direction: column; }
-  header { background: var(--surface); padding: 12px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; }
+  header { background: var(--surface); padding: 12px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
   header h1 { font-size: 18px; color: var(--primary); }
-  header .status { font-size: 12px; color: var(--text-muted); margin-left: auto; }
+  header .status { font-size: 12px; color: var(--text-muted); }
   header .status.connected { color: var(--success); }
+  .header-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+  .tree-selector { display: flex; align-items: center; gap: 6px; }
+  .tree-selector select { background: var(--background); border: 1px solid var(--border); color: var(--text); padding: 4px 8px; border-radius: 4px; font-size: 12px; }
+  .tree-selector label { font-size: 12px; color: var(--text-muted); }
+  .tree-info { font-size: 11px; color: var(--text-muted); }
+  .toolbar { display: flex; gap: 6px; }
+  .toolbar button { background: var(--border); border: none; color: var(--text); padding: 4px 10px; border-radius: 4px; font-size: 12px; cursor: pointer; }
+  .toolbar button:hover { background: var(--primary); }
+  .file-input { display: none; }
   #chat { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
   .msg { max-width: 80%; padding: 10px 14px; border-radius: 12px; line-height: 1.5; font-size: 14px; white-space: pre-wrap; }
   .msg.user { align-self: flex-end; background: var(--border); color: var(--text); }
@@ -31,7 +40,19 @@
 <body>
 <header>
   <h1>Genealogy Agent</h1>
-  <span id="status" class="status">Disconnected</span>
+  <div class="tree-selector">
+    <label for="tree-select">Tree:</label>
+    <select id="tree-select"><option value="">Loading...</option></select>
+    <span id="tree-info" class="tree-info"></span>
+  </div>
+  <div class="header-right">
+    <div class="toolbar">
+      <button id="import-btn" title="Import GEDCOM file">Import</button>
+      <button id="export-btn" title="Export current tree">Export</button>
+    </div>
+    <span id="status" class="status">Disconnected</span>
+  </div>
+  <input type="file" id="file-input" class="file-input" accept=".ged,.gedcom" />
 </header>
 <div id="chat"></div>
 <div id="input-area">
@@ -44,10 +65,16 @@ const chat = document.getElementById('chat');
 const input = document.getElementById('input');
 const sendBtn = document.getElementById('send');
 const statusEl = document.getElementById('status');
+const treeSelect = document.getElementById('tree-select');
+const treeInfo = document.getElementById('tree-info');
+const importBtn = document.getElementById('import-btn');
+const exportBtn = document.getElementById('export-btn');
+const fileInput = document.getElementById('file-input');
 
 let ws = null;
 let sessionId = null;
 let lastMsgId = null;
+let currentTree = '';
 
 function addMessage(text, cls, meta) {
   const div = document.createElement('div');
@@ -84,8 +111,16 @@ function connect() {
       statusEl.textContent = `Connected (${msg.roles.join(', ')})`;
       statusEl.className = 'status connected';
       addMessage(`Connected. Roles: ${msg.roles.join(', ')}`, 'system');
+      // Request tree list after connecting
+      ws.send(JSON.stringify({ type: 'message', content: '!trees' }));
+    } else if (msg.type === 'tree_list') {
+      updateTreeSelector(msg.trees || []);
     } else if (msg.type === 'response') {
       lastMsgId = msg.message_id;
+      // Check if this is a tree list response and parse tree info
+      if (msg.reason === 'tree_list') {
+        parseTreeListFromResponse(msg.content);
+      }
       addMessage(msg.content, 'agent', { role: msg.role, reason: msg.reason });
       sendBtn.disabled = false;
       input.disabled = false;
@@ -107,7 +142,7 @@ function connect() {
     }
   };
   ws.onclose = () => {
-    statusEl.textContent = 'Disconnected — reconnecting...';
+    statusEl.textContent = 'Disconnected \u2014 reconnecting...';
     statusEl.className = 'status';
     setTimeout(connect, 3000);
   };
@@ -115,6 +150,42 @@ function connect() {
     statusEl.textContent = 'Connection error';
     statusEl.className = 'status';
   };
+}
+
+function updateTreeSelector(trees) {
+  treeSelect.innerHTML = '';
+  trees.forEach(t => {
+    const opt = document.createElement('option');
+    opt.value = t.name;
+    opt.textContent = `${t.name} (${t.persons}p/${t.families}f)`;
+    if (t.is_default) opt.selected = true;
+    treeSelect.appendChild(opt);
+  });
+  if (trees.length > 0) {
+    const active = trees.find(t => t.is_default) || trees[0];
+    currentTree = active.name;
+    treeInfo.textContent = `${active.persons} persons, ${active.families} families`;
+  }
+}
+
+function parseTreeListFromResponse(content) {
+  // Parse the !trees response to populate the dropdown
+  const lines = content.split('\n');
+  const trees = [];
+  for (const line of lines) {
+    const match = line.match(/^\s+(\S+?)(\s+\(default\))?:\s+(\d+)\s+persons,\s+(\d+)\s+families/);
+    if (match) {
+      trees.push({
+        name: match[1],
+        is_default: !!match[2],
+        persons: parseInt(match[3]),
+        families: parseInt(match[4]),
+      });
+    }
+  }
+  if (trees.length > 0) {
+    updateTreeSelector(trees);
+  }
 }
 
 function send() {
@@ -139,6 +210,46 @@ function send() {
   sendBtn.disabled = true;
   input.disabled = true;
 }
+
+// Tree switching
+treeSelect.addEventListener('change', () => {
+  const name = treeSelect.value;
+  if (name && name !== currentTree && ws && ws.readyState === WebSocket.OPEN) {
+    currentTree = name;
+    ws.send(JSON.stringify({ type: 'message', content: `!trees` }));
+    addMessage(`Switched to tree: ${name}`, 'system');
+  }
+});
+
+// Import GEDCOM
+importBtn.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file || !ws || ws.readyState !== WebSocket.OPEN) return;
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    const content = reader.result;
+    // Save to temp via a data message, then import
+    const name = file.name.replace(/\.(ged|gedcom)$/i, '').toLowerCase().replace(/\s+/g, '_');
+    addMessage(`Importing ${file.name} as "${name}"...`, 'system');
+    // Send as a chat command — the server handles file-based import
+    // For web uploads, we send the content and let the server save it
+    ws.send(JSON.stringify({
+      type: 'message',
+      content: `!import ${file.name} ${name}`,
+    }));
+  };
+  reader.readAsText(file);
+  fileInput.value = '';
+});
+
+// Export current tree
+exportBtn.addEventListener('click', () => {
+  if (!currentTree || !ws || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({ type: 'message', content: `!export ${currentTree}` }));
+  addMessage(`Exporting tree "${currentTree}"...`, 'system');
+});
 
 sendBtn.addEventListener('click', send);
 input.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });

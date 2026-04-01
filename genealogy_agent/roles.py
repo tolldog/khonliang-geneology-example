@@ -125,9 +125,10 @@ class ResearcherRole(BaseRole):
     did the Smith family come from?"
     """
 
-    def __init__(self, model_pool, tree: GedcomTree, **kwargs):
+    def __init__(self, model_pool, tree: GedcomTree, heuristic_pool=None, **kwargs):
         super().__init__(role="researcher", model_pool=model_pool, **kwargs)
         self.tree = tree
+        self.heuristic_pool = heuristic_pool
         self._system_prompt = (
             "You are a genealogy research assistant. You have access to a "
             "parsed family tree database. Answer questions about family "
@@ -140,6 +141,17 @@ class ResearcherRole(BaseRole):
         self, message: str, context: Optional[Dict[str, Any]] = None
     ) -> str:
         return _build_context_with_session(self.tree, message)
+
+    def _effective_system_prompt(self) -> str:
+        """System prompt with learned heuristic rules appended."""
+        prompt = self.system_prompt
+        if self.heuristic_pool:
+            rules = self.heuristic_pool.build_prompt_context(
+                max_rules=3, min_confidence=0.6
+            )
+            if rules:
+                prompt = f"{prompt}\n\n[LEARNED PATTERNS]\n{rules}"
+        return prompt
 
     async def handle(
         self,
@@ -154,7 +166,7 @@ class ResearcherRole(BaseRole):
         )
 
         response, elapsed_ms = await self._timed_generate(
-            prompt=prompt, system=self.system_prompt
+            prompt=prompt, system=self._effective_system_prompt()
         )
         return {
             "response": response.strip(),
@@ -176,9 +188,10 @@ class FactCheckerRole(BaseRole):
     - Missing data patterns
     """
 
-    def __init__(self, model_pool, tree: GedcomTree, **kwargs):
+    def __init__(self, model_pool, tree: GedcomTree, heuristic_pool=None, **kwargs):
         super().__init__(role="fact_checker", model_pool=model_pool, **kwargs)
         self.tree = tree
+        self.heuristic_pool = heuristic_pool
         self._system_prompt = (
             "You are a genealogy fact-checker. Analyze the provided family "
             "data for inconsistencies, contradictions, or suspicious patterns. "
@@ -191,6 +204,17 @@ class FactCheckerRole(BaseRole):
         self, message: str, context: Optional[Dict[str, Any]] = None
     ) -> str:
         return _build_context_with_session(self.tree, message, max_persons=15)
+
+    def _effective_system_prompt(self) -> str:
+        """System prompt with learned heuristic rules appended."""
+        prompt = self.system_prompt
+        if self.heuristic_pool:
+            rules = self.heuristic_pool.build_prompt_context(
+                max_rules=3, min_confidence=0.6
+            )
+            if rules:
+                prompt = f"{prompt}\n\n[LEARNED PATTERNS]\n{rules}"
+        return prompt
 
     async def handle(
         self,
@@ -205,7 +229,7 @@ class FactCheckerRole(BaseRole):
         )
 
         response, elapsed_ms = await self._timed_generate(
-            prompt=prompt, system=self.system_prompt
+            prompt=prompt, system=self._effective_system_prompt()
         )
         return {
             "response": response.strip(),
@@ -223,10 +247,11 @@ class NarratorRole(BaseRole):
     Turns dry dates and places into engaging family stories.
     """
 
-    def __init__(self, model_pool, tree: GedcomTree, knowledge_store=None, **kwargs):
+    def __init__(self, model_pool, tree: GedcomTree, knowledge_store=None, heuristic_pool=None, **kwargs):
         super().__init__(role="narrator", model_pool=model_pool, **kwargs)
         self.tree = tree
         self.knowledge_store = knowledge_store
+        self.heuristic_pool = heuristic_pool
         self._system_prompt = (
             "You are a genealogy narrator. Your job is to present family tree "
             "data in a readable, engaging way.\n\n"
@@ -264,6 +289,17 @@ class NarratorRole(BaseRole):
             parts.append(f"\n[KNOWLEDGE]\n{knowledge_ctx}")
         return "\n".join(parts)
 
+    def _effective_system_prompt(self) -> str:
+        """System prompt with learned heuristic rules appended."""
+        prompt = self.system_prompt
+        if self.heuristic_pool:
+            rules = self.heuristic_pool.build_prompt_context(
+                max_rules=3, min_confidence=0.6
+            )
+            if rules:
+                prompt = f"{prompt}\n\n[LEARNED PATTERNS]\n{rules}"
+        return prompt
+
     async def handle(
         self,
         message: str,
@@ -281,7 +317,7 @@ class NarratorRole(BaseRole):
         )
 
         response, elapsed_ms = await self._timed_generate(
-            prompt=prompt, system=self.system_prompt
+            prompt=prompt, system=self._effective_system_prompt()
         )
         return {
             "response": response.strip(),
