@@ -16,7 +16,7 @@ This is a **showcase application** that exercises most of khonliang's feature se
 - **4 LLM roles** — researcher, fact checker, narrator, match agent with strict grounding rules
 - **Intent classifier** — LLM-based skill detection with compound intent support
 - **Query parser** — natural language to structured filters ("men from Ohio before 1920")
-- **Model routing** — complexity-based model selection (simple queries stay on 3b, complex escalate)
+- **Model routing** — complexity-based model classification per query (model escalation to larger tiers can be enabled via per-role config)
 - **Session context** — multi-turn coherence via `contextvars` (async-safe per WebSocket connection)
 - **Config-driven** — YAML config for ports, models, themes; env var overrides
 
@@ -186,7 +186,7 @@ from khonliang.routing import ComplexityStrategy, ModelRouter
 - Three domain roles (`ResearcherRole`, `FactCheckerRole`, `NarratorRole`) extend `BaseRole`
 - `GenealogyRouter` extends `BaseRouter` with keyword-based dispatch
 - `SessionContext` provides async-safe multi-turn conversation memory via `contextvars`
-- `ModelRouter` + `ComplexityStrategy` dynamically select model size per query
+- `ModelRouter` + `ComplexityStrategy` classify query complexity per role (model selection is single-tier by default; extend `role_models` config for multi-tier escalation)
 
 ### Knowledge Management
 
@@ -293,8 +293,8 @@ The genealogy MCP server exposes tree queries, knowledge tools, and training fea
 # Run MCP server (stdio for Claude Code)
 python -m genealogy_agent.mcp_server
 
-# Or HTTP for remote access
-python -m genealogy_agent.mcp_server --transport http --port 8080
+# Or HTTP for remote access (bind on all interfaces)
+python -m genealogy_agent.mcp_server --transport http --host 0.0.0.0 --port 8080
 ```
 
 Add to `.mcp.json` for Claude Code:

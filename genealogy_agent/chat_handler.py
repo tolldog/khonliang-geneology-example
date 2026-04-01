@@ -14,10 +14,9 @@ import time
 from typing import Any, Dict, List, Optional
 
 from khonliang.knowledge import Librarian
-from khonliang.knowledge.store import Tier
 from khonliang.research import ResearchPool, ResearchTrigger
 
-from genealogy_agent.report_server import get_detector, publish_report
+from genealogy_agent.report_server import publish_report
 
 logger = logging.getLogger(__name__)
 

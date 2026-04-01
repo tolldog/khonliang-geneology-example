@@ -30,12 +30,11 @@ from genealogy_agent.chat_handler import ResearchChatHandler
 from genealogy_agent.config import load_config
 from genealogy_agent.consensus import create_consensus_team, create_debate_orchestrator
 from genealogy_agent.cross_matcher import CrossMatcher
-from genealogy_agent.forest import TreeForest, load_forest_from_config
+from genealogy_agent.forest import load_forest_from_config
 from genealogy_agent.importer import GedcomImporter
-from genealogy_agent.match_agent import MatchAgentRole, MatchVotingAgent
+from genealogy_agent.match_agent import MatchAgentRole
 from genealogy_agent.merge import MergeEngine
-from genealogy_agent.report_server import get_detector, publish_report, start_report_server
-from genealogy_agent.gedcom_parser import GedcomTree
+from genealogy_agent.report_server import start_report_server
 from genealogy_agent.intent import IntentClassifier
 from genealogy_agent.personalities import create_genealogy_registry
 from genealogy_agent.self_eval import create_genealogy_evaluator
@@ -523,13 +522,15 @@ def build_server(config: Dict[str, Any]):
         },
     )
 
-    # Model router — pick model size based on query complexity.
+    # Model router — classify query complexity per role.
     # Uses the fast researcher model as the classifier.
-    # Simple lookups stay on the 3b, complex queries escalate.
+    # Currently, all queries for a role use that role's configured model;
+    # complexity is classified but does not yet change model size.
     models_config = config["ollama"]["models"]
     role_models = {}
+    # Each role maps to a single configured model. Extend to a list of tiers
+    # (small → large) when per-role model escalation is needed.
     for role_name, model in models_config.items():
-        # Build tier list: configured model + any larger alternatives
         role_models[role_name] = [model]
 
     classifier_client = OllamaClient(
