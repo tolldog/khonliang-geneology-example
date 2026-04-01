@@ -5,11 +5,9 @@ Docs: https://www.geni.com/platform/developer/help
 API Version: 1
 """
 
-import json
 import logging
 import os
-from typing import Any, Dict, List, Optional
-from urllib.parse import urlencode
+from typing import Dict, List, Optional
 
 import requests
 

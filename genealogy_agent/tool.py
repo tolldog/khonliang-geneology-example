@@ -43,7 +43,6 @@ import asyncio
 import json
 import os
 import sys
-from typing import Optional
 
 # Suppress logging to keep output clean for tool use
 import logging

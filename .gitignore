@@ -9,3 +9,5 @@ venv/
 data/
 model_profiles.yaml
 .env
+CLAUDE.md
+.claude/
