@@ -70,6 +70,8 @@ def _defaults() -> Dict[str, Any]:
             "gedcom": "data/Toll Family Tree.ged",
             "gedcoms": {},
             "knowledge_db": "data/knowledge.db",
+            "max_context_persons": 100,
+            "max_context_persons_fact_checker": 150,
         },
         "ollama": {
             "url": "http://localhost:11434",

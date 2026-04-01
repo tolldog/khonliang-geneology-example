@@ -50,6 +50,8 @@ class ResearchChatHandler:
         # Multi-tree / matching
         "!load", "!trees", "!scan", "!matches", "!link",
         "!merge", "!export", "!import",
+        # Runtime config
+        "!config",
     }
 
     def __init__(
@@ -79,6 +81,7 @@ class ResearchChatHandler:
         self.importer = importer
         self.merge_engine = merge_engine
         self.triple_store = triple_store
+        self.roles: Optional[Dict] = None  # set by server after init
 
     def is_command(self, message: str) -> bool:
         """Check if a message is any ! command."""
@@ -157,6 +160,10 @@ class ResearchChatHandler:
             return self._handle_export(message)
         if msg_lower.startswith("!import"):
             return self._handle_import(message)
+
+        # Runtime config
+        if msg_lower.startswith("!config"):
+            return self._handle_config(message)
 
         return {"type": "error", "content": f"Unknown command: {message[:30]}"}
 
@@ -885,6 +892,91 @@ class ResearchChatHandler:
             "reason": "session_report",
             "metadata": {"report_url": url},
         }
+
+    # ------------------------------------------------------------------
+    # Runtime config
+    # ------------------------------------------------------------------
+
+    def _handle_config(self, message: str) -> Dict[str, Any]:
+        """!config [key] [value] — view or update runtime configuration.
+
+        Examples:
+            !config                          — show all configurable settings
+            !config max_context_persons      — show current value
+            !config max_context_persons 200  — update value for all roles
+        """
+        parts = message.split(None, 2)
+
+        # Configurable settings mapped to role attributes
+        config_keys = {
+            "max_context_persons": {
+                "description": "Max persons included in LLM context",
+                "getter": lambda: {
+                    r.role: r.max_context_persons
+                    for r in (self.roles or {}).values()
+                    if hasattr(r, "max_context_persons")
+                },
+                "setter": lambda v: self._set_role_attr("max_context_persons", int(v)),
+            },
+        }
+
+        # No args — show all settings
+        if len(parts) < 2:
+            lines = ["**Runtime Configuration:**\n"]
+            for key, info in config_keys.items():
+                current = info["getter"]()
+                lines.append(f"  `{key}`: {current}")
+                lines.append(f"    {info['description']}")
+            lines.append("\nUsage: `!config <key> <value>` to update")
+            return {
+                "type": "response",
+                "content": "\n".join(lines),
+                "role": "system",
+                "reason": "config",
+            }
+
+        key = parts[1].lower()
+        if key not in config_keys:
+            return {
+                "type": "response",
+                "content": f"Unknown config key: `{key}`\nAvailable: {', '.join(config_keys)}",
+                "role": "system",
+            }
+
+        # Get only
+        if len(parts) < 3:
+            current = config_keys[key]["getter"]()
+            return {
+                "type": "response",
+                "content": f"`{key}`: {current}\n{config_keys[key]['description']}",
+                "role": "system",
+            }
+
+        # Set value
+        value = parts[2]
+        try:
+            config_keys[key]["setter"](value)
+            new_val = config_keys[key]["getter"]()
+            return {
+                "type": "response",
+                "content": f"Updated `{key}` to {new_val}",
+                "role": "system",
+                "reason": "config_update",
+            }
+        except (ValueError, TypeError) as e:
+            return {
+                "type": "response",
+                "content": f"Invalid value for `{key}`: {e}",
+                "role": "system",
+            }
+
+    def _set_role_attr(self, attr: str, value) -> None:
+        """Set an attribute on all roles that have it."""
+        if not self.roles:
+            return
+        for role in self.roles.values():
+            if hasattr(role, attr):
+                setattr(role, attr, value)
 
     def get_status(self) -> Dict[str, Any]:
         return {

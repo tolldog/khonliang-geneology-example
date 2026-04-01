@@ -545,18 +545,25 @@ def build_server(config: Dict[str, Any]):
         ),
     )
 
+    app_cfg = config.get("app", {})
+    max_ctx = app_cfg.get("max_context_persons", 100)
+    max_ctx_fc = app_cfg.get("max_context_persons_fact_checker", 150)
+
     roles = {
         "researcher": ResearcherRole(
             pool, tree=tree, model_router=model_router,
             heuristic_pool=heuristic_pool,
+            max_context_persons=max_ctx,
         ),
         "fact_checker": FactCheckerRole(
             pool, tree=tree, model_router=model_router,
             heuristic_pool=heuristic_pool,
+            max_context_persons=max_ctx_fc,
         ),
         "narrator": NarratorRole(
             pool, tree=tree, knowledge_store=store,
             model_router=model_router, heuristic_pool=heuristic_pool,
+            max_context_persons=max_ctx,
         ),
     }
 
@@ -604,6 +611,7 @@ def build_server(config: Dict[str, Any]):
         match_agent=match_role, importer=importer,
         merge_engine=merge_engine, triple_store=triple_store,
     )
+    research_handler.roles = roles
 
     # Self-evaluation using khonliang BaseEvaluator + genealogy rules
     evaluator = create_genealogy_evaluator(tree)

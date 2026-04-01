@@ -302,6 +302,69 @@ def cmd_merge(args):
     print(result.display)
 
 
+def cmd_config(args):
+    """View or update runtime configuration."""
+    config = load_config()
+    app_cfg = config.get("app", {})
+
+    configurable = {
+        "max_context_persons": {
+            "description": "Max persons included in LLM context (researcher/narrator)",
+            "key": "max_context_persons",
+            "default": 100,
+            "type": int,
+        },
+        "max_context_persons_fact_checker": {
+            "description": "Max persons for fact checker context",
+            "key": "max_context_persons_fact_checker",
+            "default": 150,
+            "type": int,
+        },
+    }
+
+    if not args.key:
+        print("Runtime Configuration:\n")
+        for key, info in configurable.items():
+            val = app_cfg.get(info["key"], info["default"])
+            print(f"  {key} = {val}")
+            print(f"    {info['description']}")
+        print("\nUsage: genealogy config <key> <value>")
+        return
+
+    if args.key not in configurable:
+        print(f"Unknown key: {args.key}")
+        print(f"Available: {', '.join(configurable)}")
+        return
+
+    info = configurable[args.key]
+
+    if args.value is None:
+        val = app_cfg.get(info["key"], info["default"])
+        print(f"{args.key} = {val}")
+        print(f"  {info['description']}")
+        return
+
+    # Update config.yaml
+    try:
+        new_val = info["type"](args.value)
+    except ValueError:
+        print(f"Invalid value: {args.value} (expected {info['type'].__name__})")
+        return
+
+    try:
+        import yaml
+        config_path = "config.yaml"
+        with open(config_path) as f:
+            raw = yaml.safe_load(f) or {}
+        raw.setdefault("app", {})[info["key"]] = new_val
+        with open(config_path, "w") as f:
+            yaml.dump(raw, f, default_flow_style=False, sort_keys=False)
+        print(f"Updated {args.key} = {new_val} in {config_path}")
+        print("Restart the server for changes to take effect, or use !config in chat for live updates.")
+    except Exception as e:
+        print(f"Failed to update config: {e}")
+
+
 # ------------------------------------------------------------------
 # Main
 # ------------------------------------------------------------------
@@ -367,6 +430,12 @@ def main():
         help="Merge strategy (default: prefer_target)",
     )
 
+    # --- Config ---
+
+    p_config = sub.add_parser("config", help="View or update runtime configuration")
+    p_config.add_argument("key", nargs="?", default=None, help="Config key to view/update")
+    p_config.add_argument("value", nargs="?", default=None, help="New value to set")
+
     args = parser.parse_args()
 
     commands = {
@@ -381,6 +450,7 @@ def main():
         "import": cmd_import,
         "export": cmd_export,
         "merge": cmd_merge,
+        "config": cmd_config,
     }
     commands[args.command](args)
 

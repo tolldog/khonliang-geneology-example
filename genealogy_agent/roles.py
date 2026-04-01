@@ -22,7 +22,7 @@ _session_context_var: contextvars.ContextVar[str] = contextvars.ContextVar(
 
 
 def _build_context_with_session(
-    tree: GedcomTree, message: str, max_persons: int = 10
+    tree: GedcomTree, message: str, max_persons: int = 100
 ) -> str:
     """Build tree context + session context for multi-turn coherence."""
     result = _build_multi_context(tree, message, max_persons)
@@ -33,7 +33,7 @@ def _build_context_with_session(
 
 
 def _build_multi_context(
-    tree: GedcomTree, message: str, max_persons: int = 10
+    tree: GedcomTree, message: str, max_persons: int = 100
 ) -> str:
     """
     Smart context builder — handles both single and multi-person queries.
@@ -84,6 +84,8 @@ def _build_multi_context(
         lines = [f"Found {len(all_matches)} matching persons:"]
         for p in all_matches[:max_persons]:
             lines.append(f"\n- {p.display}")
+            if p.death_place:
+                lines.append(f"  Death: {p.death_date or '?'}, {p.death_place}")
             parents = tree.get_parents(p.xref)
             if parents:
                 lines.append(
@@ -93,6 +95,11 @@ def _build_multi_context(
             if spouses:
                 lines.append(
                     f"  Spouse: {', '.join(s.full_name for s in spouses)}"
+                )
+            children = tree.get_children(p.xref)
+            if children:
+                lines.append(
+                    f"  Children: {', '.join(c.full_name for c in children)}"
                 )
         if len(all_matches) > max_persons:
             lines.append(
@@ -125,10 +132,12 @@ class ResearcherRole(BaseRole):
     did the Smith family come from?"
     """
 
-    def __init__(self, model_pool, tree: GedcomTree, heuristic_pool=None, **kwargs):
+    def __init__(self, model_pool, tree: GedcomTree, heuristic_pool=None,
+                 max_context_persons: int = 100, **kwargs):
         super().__init__(role="researcher", model_pool=model_pool, **kwargs)
         self.tree = tree
         self.heuristic_pool = heuristic_pool
+        self.max_context_persons = max_context_persons
         self._system_prompt = (
             "You are a genealogy research assistant. You have access to a "
             "parsed family tree database. Answer questions about family "
@@ -140,7 +149,9 @@ class ResearcherRole(BaseRole):
     def build_context(
         self, message: str, context: Optional[Dict[str, Any]] = None
     ) -> str:
-        return _build_context_with_session(self.tree, message)
+        return _build_context_with_session(
+            self.tree, message, max_persons=self.max_context_persons
+        )
 
     def _effective_system_prompt(self) -> str:
         """System prompt with learned heuristic rules appended."""
@@ -188,10 +199,12 @@ class FactCheckerRole(BaseRole):
     - Missing data patterns
     """
 
-    def __init__(self, model_pool, tree: GedcomTree, heuristic_pool=None, **kwargs):
+    def __init__(self, model_pool, tree: GedcomTree, heuristic_pool=None,
+                 max_context_persons: int = 150, **kwargs):
         super().__init__(role="fact_checker", model_pool=model_pool, **kwargs)
         self.tree = tree
         self.heuristic_pool = heuristic_pool
+        self.max_context_persons = max_context_persons
         self._system_prompt = (
             "You are a genealogy fact-checker. Analyze the provided family "
             "data for inconsistencies, contradictions, or suspicious patterns. "
@@ -203,7 +216,9 @@ class FactCheckerRole(BaseRole):
     def build_context(
         self, message: str, context: Optional[Dict[str, Any]] = None
     ) -> str:
-        return _build_context_with_session(self.tree, message, max_persons=15)
+        return _build_context_with_session(
+            self.tree, message, max_persons=self.max_context_persons
+        )
 
     def _effective_system_prompt(self) -> str:
         """System prompt with learned heuristic rules appended."""
@@ -247,11 +262,13 @@ class NarratorRole(BaseRole):
     Turns dry dates and places into engaging family stories.
     """
 
-    def __init__(self, model_pool, tree: GedcomTree, knowledge_store=None, heuristic_pool=None, **kwargs):
+    def __init__(self, model_pool, tree: GedcomTree, knowledge_store=None,
+                 heuristic_pool=None, max_context_persons: int = 100, **kwargs):
         super().__init__(role="narrator", model_pool=model_pool, **kwargs)
         self.tree = tree
         self.knowledge_store = knowledge_store
         self.heuristic_pool = heuristic_pool
+        self.max_context_persons = max_context_persons
         self._system_prompt = (
             "You are a genealogy narrator. Your job is to present family tree "
             "data in a readable, engaging way.\n\n"
@@ -275,7 +292,9 @@ class NarratorRole(BaseRole):
         self, message: str, context: Optional[Dict[str, Any]] = None
     ) -> str:
         # Tree data
-        tree_ctx = _build_context_with_session(self.tree, message)
+        tree_ctx = _build_context_with_session(
+            self.tree, message, max_persons=self.max_context_persons
+        )
 
         # Knowledge store data (previously researched facts)
         knowledge_ctx = ""
