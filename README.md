@@ -1,6 +1,12 @@
-# khonliang-genealogy-example
+<p align="center">
+  <img src="assets/logo.png" alt="Genealogy Agent" width="200" />
+</p>
 
-LLM-backed genealogy research tool — example project demonstrating [ollama-khonliang](https://github.com/tolldog/ollama-khonliang) as a dependency.
+<h1 align="center">khonliang-genealogy-example</h1>
+
+<p align="center">
+  LLM-backed genealogy research tool — example project demonstrating <a href="https://github.com/tolldog/ollama-khonliang">ollama-khonliang</a> as a dependency.
+</p>
 
 This is a **showcase application** that exercises most of khonliang's feature set: multi-tree management, cross-tree matching with a dedicated MatchAgent, consensus voting, debate orchestration, personality-driven routing, knowledge management, self-evaluation, research coordination, and MCP server exposure.
 
