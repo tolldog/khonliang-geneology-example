@@ -12,7 +12,7 @@ Report types:
 import logging
 import re
 import time
-from typing import Any, Dict, List, Optional
+from typing import Optional
 
 from khonliang.knowledge.store import KnowledgeStore, Tier
 

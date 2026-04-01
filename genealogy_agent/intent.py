@@ -137,7 +137,6 @@ class IntentClassifier:
 
     def _parse_llm_response(self, response: str) -> Optional[Intent]:
         """Parse the LLM's JSON classification."""
-        import re
 
         text = response.strip()
 

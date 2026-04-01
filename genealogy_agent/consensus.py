@@ -7,9 +7,9 @@ the response and optionally debate disagreements.
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
-from khonliang.consensus import AgentTeam, AgentVote, ConsensusEngine, ConsensusResult
+from khonliang.consensus import AgentTeam, AgentVote, ConsensusEngine
 from khonliang.debate import DebateConfig, DebateOrchestrator
 
 logger = logging.getLogger(__name__)

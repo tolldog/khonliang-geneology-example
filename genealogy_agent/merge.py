@@ -8,10 +8,9 @@ Supports three strategies: prefer_target (fill gaps), prefer_source
 
 import logging
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List
 
 from genealogy_agent.forest import TreeForest
-from genealogy_agent.gedcom_parser import Person
 
 logger = logging.getLogger(__name__)
 

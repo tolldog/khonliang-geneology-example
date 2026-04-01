@@ -8,9 +8,8 @@ Returns JSON.
 Docs: https://github.com/wikitree/wikitree-api
 """
 
-import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 import requests
 
