@@ -32,6 +32,40 @@ def _build_context_with_session(
     return result
 
 
+# Region-to-state mapping for geographic queries
+REGION_EXPANSIONS = {
+    "midwest": [
+        "Indiana", "Ohio", "Illinois", "Michigan", "Wisconsin",
+        "Minnesota", "Iowa", "Missouri", "Kansas", "Nebraska",
+        "South Dakota", "North Dakota",
+    ],
+    "new england": [
+        "Massachusetts", "Connecticut", "Rhode Island", "Vermont",
+        "New Hampshire", "Maine",
+    ],
+    "south": [
+        "Virginia", "North Carolina", "South Carolina", "Georgia",
+        "Alabama", "Mississippi", "Louisiana", "Tennessee", "Kentucky",
+        "Arkansas", "Florida", "Texas",
+    ],
+    "mid-atlantic": [
+        "New York", "New Jersey", "Pennsylvania", "Delaware", "Maryland",
+    ],
+    "west": [
+        "California", "Oregon", "Washington", "Nevada", "Utah",
+        "Colorado", "Arizona", "New Mexico", "Montana", "Wyoming", "Idaho",
+    ],
+    "appalachia": [
+        "West Virginia", "Kentucky", "Tennessee", "Virginia",
+        "North Carolina", "Ohio", "Pennsylvania",
+    ],
+    "great plains": [
+        "Kansas", "Nebraska", "South Dakota", "North Dakota",
+        "Oklahoma", "Montana", "Wyoming",
+    ],
+}
+
+
 def _build_multi_context(
     tree: GedcomTree, message: str, max_persons: int = 100
 ) -> str:
@@ -39,10 +73,18 @@ def _build_multi_context(
     Smart context builder — handles both single and multi-person queries.
 
     Tries multiple strategies:
-    1. Search for all matching persons (handles "all the Tims", "Toll family")
-    2. Find a specific person mentioned by name
-    3. Fall back to tree summary
+    1. Expand regional terms (e.g., "midwest" -> Indiana, Ohio, ...)
+    2. Search for all matching persons (handles "all the Tims", "Toll family")
+    3. Find a specific person mentioned by name
+    4. Fall back to tree summary
     """
+    # Strategy 0: expand regional terms into state searches
+    msg_lower = message.lower()
+    region_states = []
+    for region, states in REGION_EXPANSIONS.items():
+        if region in msg_lower:
+            region_states.extend(states)
+
     # Strategy 1: broad search — look for name-like words in the query
     # Skip common non-name words
     skip = {
@@ -56,6 +98,8 @@ def _build_multi_context(
         "story", "history", "migration", "check", "verify", "validate",
         "narrative", "describe", "explain", "find", "search", "list",
         "show", "give", "get", "can", "you", "please", "could",
+        "midwest", "south", "west", "east", "north",
+        "appalachia", "plains",
     }
 
     # Extract candidate search terms
@@ -69,6 +113,10 @@ def _build_multi_context(
         cleaned = cleaned.strip()
         if cleaned.lower() not in skip and len(cleaned) > 1:
             candidates.append(cleaned)
+
+    # Add expanded region states as search terms
+    if region_states:
+        candidates.extend(region_states)
 
     # Try each candidate as a search term
     all_matches: List[Person] = []
