@@ -97,7 +97,7 @@ class CrossMatcher:
                 continue
 
             for person_b in surname_index_b[key]:
-                match = self._score_pair(
+                match = self.score_pair(
                     person_a, person_b, ta, tb, tree_a, tree_b
                 )
                 if match.score >= min_score:
@@ -121,12 +121,12 @@ class CrossMatcher:
         if not ta or not tb:
             return None
 
-        return self._score_pair(
+        return self.score_pair(
             qp_a.person, qp_b.person, ta, tb,
             qp_a.tree_name, qp_b.tree_name,
         )
 
-    def _score_pair(
+    def score_pair(
         self,
         a: Person, b: Person,
         tree_a: GedcomTree, tree_b: GedcomTree,
