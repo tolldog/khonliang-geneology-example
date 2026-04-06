@@ -1,19 +1,16 @@
 """Tests for GRA Pipeline — Generator/Reviewer/Adjudicator entity resolution (FR-11)."""
 
-import pytest
 
-from genealogy_agent.cross_matcher import CrossMatcher
 from genealogy_agent.forest import QualifiedPerson, TreeForest
 from genealogy_agent.gedcom_parser import GedcomTree, Person
 from genealogy_agent.gra_pipeline import (
     AdjudicationResult,
     GenealogyAdjudicator,
-    GRAPipeline,
     GRAResult,
     MatchReviewerRole,
     ReviewResult,
 )
-from genealogy_agent.match_agent import MatchAgentRole, MatchAssessment
+from genealogy_agent.match_agent import MatchAssessment
 
 
 class FakeModelPool:

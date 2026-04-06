@@ -29,9 +29,8 @@ from typing import Any, Dict, List, Optional
 
 from khonliang.roles.base import BaseRole
 
-from genealogy_agent.cross_matcher import CrossMatcher, MatchCandidate
+from genealogy_agent.cross_matcher import CrossMatcher
 from genealogy_agent.forest import QualifiedPerson, TreeForest
-from genealogy_agent.gedcom_parser import Person
 from genealogy_agent.match_agent import MatchAgentRole, MatchAssessment
 
 logger = logging.getLogger(__name__)
