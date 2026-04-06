@@ -179,12 +179,13 @@ MISSED_CONFLICTS: none
         assert result.verdict == "match"
         assert len(result.missed_evidence) == 2
 
-    def test_parse_defaults_to_original(self):
-        """When parsing fails, defaults come from original assessment."""
+    def test_parse_defaults_to_disagree(self):
+        """When parsing fails, defaults to disagree (safe default)."""
         original = MatchAssessment(
             confidence=0.7, verdict="possible_match", reasoning="Unclear"
         )
         result = self.reviewer._parse_review("Unparseable response", original)
+        assert result.agrees is False
         assert result.verdict == "possible_match"
         assert result.confidence == 0.7
 
@@ -379,3 +380,117 @@ class TestGRAResult:
         assert d["resolved_by"] == "generator"
         assert d["reviewer"] is None
         assert d["adjudication"] is None
+
+
+# ─── End-to-end pipeline tests (stubbed) ─────────────────────────────
+
+
+class StubMatchAgent:
+    """Stub Generator that returns a fixed assessment."""
+
+    def __init__(self, verdict="match", confidence=0.9):
+        self._verdict = verdict
+        self._confidence = confidence
+
+    async def evaluate_match(self, person_a, person_b, context=None):
+        return MatchAssessment(
+            confidence=self._confidence,
+            verdict=self._verdict,
+            evidence=["Name match", "Date match"],
+            reasoning="Stub assessment",
+        )
+
+
+class StubReviewer:
+    """Stub Reviewer that returns a fixed review."""
+
+    def __init__(self, agrees=True, verdict="match", confidence=0.85):
+        self._agrees = agrees
+        self._verdict = verdict
+        self._confidence = confidence
+
+    async def review(self, person_a, person_b, assessment):
+        return ReviewResult(
+            agrees=self._agrees,
+            verdict=self._verdict,
+            confidence=self._confidence,
+            critique="Stub review",
+        )
+
+
+class TestGRAPipelineEndToEnd:
+    """End-to-end pipeline tests with stubbed Generator/Reviewer."""
+
+    def _make_pipeline(self, gen_verdict="match", gen_conf=0.9,
+                       rev_agrees=True, rev_verdict="match", rev_conf=0.85):
+        forest = _make_forest_with_two_trees()
+        generator = StubMatchAgent(gen_verdict, gen_conf)
+        reviewer = StubReviewer(rev_agrees, rev_verdict, rev_conf)
+        adjudicator = GenealogyAdjudicator(forest)
+        return GRAPipeline(generator, reviewer, adjudicator), forest
+
+    def _persons(self, forest):
+        person_a = QualifiedPerson(
+            tree_name="tree_a",
+            person=forest.get_tree("tree_a").persons["@I1@"],
+        )
+        person_b = QualifiedPerson(
+            tree_name="tree_b",
+            person=forest.get_tree("tree_b").persons["@I1@"],
+        )
+        return person_a, person_b
+
+    @pytest.mark.asyncio
+    async def test_consensus_path(self):
+        """When Generator and Reviewer agree, resolved_by='consensus'."""
+        pipeline, forest = self._make_pipeline(
+            gen_verdict="match", rev_agrees=True, rev_verdict="match",
+        )
+        person_a, person_b = self._persons(forest)
+
+        result = await pipeline.evaluate(person_a, person_b)
+
+        assert result.resolved_by == "consensus"
+        assert result.verdict == "match"
+        assert result.adjudication is None
+        assert result.confidence == pytest.approx(0.875, abs=0.01)
+
+    @pytest.mark.asyncio
+    async def test_adjudicator_path(self):
+        """When Generator and Reviewer disagree, adjudicator resolves."""
+        pipeline, forest = self._make_pipeline(
+            gen_verdict="match", gen_conf=0.9,
+            rev_agrees=False, rev_verdict="no_match", rev_conf=0.7,
+        )
+        person_a, person_b = self._persons(forest)
+
+        result = await pipeline.evaluate(person_a, person_b)
+
+        assert result.resolved_by == "adjudicator"
+        assert result.adjudication is not None
+        # Strong heuristic match → adjudicator should say "match"
+        assert result.verdict == "match"
+
+    @pytest.mark.asyncio
+    async def test_disagreement_with_weak_heuristics(self):
+        """Disagreement on weak candidates → adjudicator may downgrade."""
+        forest = _make_weak_forest()
+        generator = StubMatchAgent("match", 0.8)
+        reviewer = StubReviewer(False, "no_match", 0.7)
+        adjudicator = GenealogyAdjudicator(forest)
+        pipeline = GRAPipeline(generator, reviewer, adjudicator)
+
+        person_a = QualifiedPerson(
+            tree_name="tree_a",
+            person=forest.get_tree("tree_a").persons["@I1@"],
+        )
+        person_b = QualifiedPerson(
+            tree_name="tree_b",
+            person=forest.get_tree("tree_b").persons["@I1@"],
+        )
+
+        result = await pipeline.evaluate(person_a, person_b)
+
+        assert result.resolved_by == "adjudicator"
+        # Weak heuristics → should not be "match"
+        assert result.verdict in ("no_match", "possible_match")

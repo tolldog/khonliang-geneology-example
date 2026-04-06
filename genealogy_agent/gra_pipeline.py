@@ -187,7 +187,7 @@ class MatchReviewerRole(BaseRole):
         self, response: str, original: MatchAssessment
     ) -> ReviewResult:
         """Parse structured Reviewer output."""
-        agrees = True
+        agrees = False  # Default to disagree unless explicitly parsed
         verdict = original.verdict
         confidence = original.confidence
         critique = response
@@ -338,7 +338,7 @@ class GenealogyAdjudicator:
             tree_a = self.forest.get_tree(person_a.tree_name)
             tree_b = self.forest.get_tree(person_b.tree_name)
             if tree_a and tree_b:
-                candidate = self.matcher._score_pair(
+                candidate = self.matcher.score_pair(
                     person_a.person, person_b.person,
                     tree_a, tree_b,
                     person_a.tree_name, person_b.tree_name,
